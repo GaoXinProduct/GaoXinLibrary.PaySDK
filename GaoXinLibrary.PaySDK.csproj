@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!-- NuGet 包元数据 -->
+    <PackageId>GaoXinLibrary.PaySDK</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>GaoXin</Authors>
+    <Description>统一支付 SDK，支持微信支付 v3、支付宝、银联，提供支付、查询、退款、回调、账单下载功能。</Description>
+    <PackageTags>wechat-pay;alipay;unionpay;payment;gaoxin-sdk</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/GaoXinProduct/GaoXinLibrary.PaySDK</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/GaoXinProduct/GaoXinLibrary.PaySDK</PackageProjectUrl>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net9.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net10.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net8.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net9.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0|AnyCPU'">
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include=".github\workflows\publish.yml" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+	<!-- net8.0 → 最新 8.x -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.*" />
+		<PackageReference Include="Microsoft.Extensions.Http" Version="8.*" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="8.*" />
+	</ItemGroup>
+
+	<!-- net9.0 → 最新 9.x -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
+		<PackageReference Include="Microsoft.Extensions.Http" Version="9.*" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="9.*" />
+	</ItemGroup>
+
+	<!-- net10.0 → 最新 10.x -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
+		<PackageReference Include="Microsoft.Extensions.Http" Version="10.*" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
+	</ItemGroup>
+
+</Project>
