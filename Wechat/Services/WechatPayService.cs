@@ -46,14 +46,20 @@ public sealed class WechatPayService : IWechatPayService
         FillCommonFields(request);
         FillH5SceneFields(request);
         request.ValidateH5Fields();
-        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct);
-
-        // 拼接 redirect_url：支付完成后跳转指定页面
+        // redirect_url 必须携带，优先使用请求级别配置，其次使用全局配置
         var redirectUrl = !string.IsNullOrEmpty(request.RedirectUrl)
             ? request.RedirectUrl
             : _options.H5RedirectUrl;
 
-        if (!string.IsNullOrEmpty(redirectUrl) && !string.IsNullOrEmpty(resp.H5Url))
+        if (string.IsNullOrEmpty(redirectUrl))
+            throw new ArgumentException(
+                "H5 下单必须设置 RedirectUrl（支付完成后跳转地址），请通过 WechatH5OrderRequest.RedirectUrl 或 WechatPayOptions.H5RedirectUrl 配置",
+                nameof(request));
+
+        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct);
+
+        // 拼接 redirect_url：支付完成后跳转指定页面
+        if (!string.IsNullOrEmpty(resp.H5Url))
         {
             var separator = resp.H5Url.Contains('?') ? "&" : "?";
             resp.H5Url = $"{resp.H5Url}{separator}redirect_url={Uri.EscapeDataString(redirectUrl)}";
