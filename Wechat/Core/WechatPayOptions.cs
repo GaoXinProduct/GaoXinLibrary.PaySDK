@@ -38,6 +38,13 @@ public class WechatPayOptions
     /// </summary>
     public string RefundNotifyUrl { get; set; } = string.Empty;
 
+    /// <summary>
+    /// H5 支付完成后跳转的页面 URL（redirect_url）
+    /// <para>拼接在 h5_url 后面，支付完成后返回指定页面。域名必须与微信商户平台「H5 支付」中配置的域名一致。</para>
+    /// <para>配置后 H5 下单自动拼接，也可在 <see cref="WechatH5OrderRequest.RedirectUrl"/> 中按请求覆盖。</para>
+    /// </summary>
+    public string H5RedirectUrl { get; set; } = string.Empty;
+
     /// <summary>API 基础地址，默认 https://api.mch.weixin.qq.com</summary>
     public string BaseUrl { get; set; } = "https://api.mch.weixin.qq.com";
 

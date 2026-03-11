@@ -44,8 +44,22 @@ public sealed class WechatPayService : IWechatPayService
     public async Task<WechatH5OrderResponse> CreateH5OrderAsync(WechatH5OrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
+        FillH5SceneFields(request);
         request.ValidateH5Fields();
-        return await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct);
+        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct);
+
+        // 拼接 redirect_url：支付完成后跳转指定页面
+        var redirectUrl = !string.IsNullOrEmpty(request.RedirectUrl)
+            ? request.RedirectUrl
+            : _options.H5RedirectUrl;
+
+        if (!string.IsNullOrEmpty(redirectUrl) && !string.IsNullOrEmpty(resp.H5Url))
+        {
+            var separator = resp.H5Url.Contains('?') ? "&" : "?";
+            resp.H5Url = $"{resp.H5Url}{separator}redirect_url={Uri.EscapeDataString(redirectUrl)}";
+        }
+
+        return resp;
     }
 
     /// <inheritdoc/>
@@ -199,6 +213,12 @@ public sealed class WechatPayService : IWechatPayService
             request.MchId = _options.MchId;
         if (string.IsNullOrEmpty(request.NotifyUrl))
             request.NotifyUrl = _options.NotifyUrl;
+    }
+
+    private void FillH5SceneFields(WechatH5OrderRequest request)
+    {
+        request.SceneInfo ??= new WechatPaySceneInfo();
+        request.SceneInfo.H5Info ??= new WechatPayH5Info();
     }
 
     private static string GenerateNonce()

@@ -8,58 +8,7 @@ namespace GaoXinLibrary.PaySDK.Core;
 /// </summary>
 public enum PayChannel : byte
 {
-    /// <summary>
-    /// 银联在线网关支付（PC 前台跳转）
-    /// <para>bizType=000201，channelType=07</para>
-    /// </summary>
-    [Description("银联网关支付")]
-    [Display(Name = "银联在线网关支付")]
-    UnionPayGateway = 31,
-
-    /// <summary>
-    /// 银联无跳转支付（后台消费，无须跳转银联网关）
-    /// <para>bizType=000301</para>
-    /// </summary>
-    [Description("银联无跳转支付")]
-    [Display(Name = "银联无跳转支付")]
-    UnionPayNoRedirect,
-
-    /// <summary>
-    /// 银联 WAP 支付（手机网页支付）
-    /// <para>bizType=000201，channelType=08</para>
-    /// </summary>
-    [Description("银联WAP支付")]
-    [Display(Name = "银联WAP支付")]
-    UnionPayWap,
-
-    /// <summary>
-    /// 银联二维码支付（主扫/被扫）
-    /// <para>bizType=000000</para>
-    /// </summary>
-    [Description("银联二维码支付")]
-    [Display(Name = "银联二维码支付")]
-    UnionPayQrCode,
-
-    /// <summary>
-    /// 银联签约支付（签约后免密扣款）
-    /// </summary>
-    [Description("银联签约支付")]
-    [Display(Name = "银联签约支付")]
-    UnionPayContract,
-
-    /// <summary>
-    /// 云闪付无感支付（签约后后台扣款）
-    /// </summary>
-    [Description("云闪付无感支付")]
-    [Display(Name = "云闪付无感支付")]
-    UnionPayQuickPass,
-
-    /// <summary>
-    /// 银联 Apple Pay（基于 Token 的移动端支付）
-    /// </summary>
-    [Description("银联Apple Pay")]
-    [Display(Name = "银联Apple Pay")]
-    UnionPayApplePay,
+    //0-10由外部系统定义，11-20微信支付，21-30支付宝支付，31-40银联支付，41-50其他支付
 
     /// <summary>
     /// 微信 JSAPI 支付（公众号内）
@@ -137,4 +86,58 @@ public enum PayChannel : byte
     [Description("支付宝pc支付")]
     [Display(Name = "支付宝pc支付")]
     AlipayPage,
+
+
+    /// <summary>
+    /// 银联在线网关支付（PC 前台跳转）
+    /// <para>bizType=000201，channelType=07</para>
+    /// </summary>
+    [Description("银联网关支付")]
+    [Display(Name = "银联在线网关支付")]
+    UnionPayGateway = 31,
+
+    /// <summary>
+    /// 银联无跳转支付（后台消费，无须跳转银联网关）
+    /// <para>bizType=000301</para>
+    /// </summary>
+    [Description("银联无跳转支付")]
+    [Display(Name = "银联无跳转支付")]
+    UnionPayNoRedirect,
+
+    /// <summary>
+    /// 银联 WAP 支付（手机网页支付）
+    /// <para>bizType=000201，channelType=08</para>
+    /// </summary>
+    [Description("银联WAP支付")]
+    [Display(Name = "银联WAP支付")]
+    UnionPayWap,
+
+    /// <summary>
+    /// 银联二维码支付（主扫/被扫）
+    /// <para>bizType=000000</para>
+    /// </summary>
+    [Description("银联二维码支付")]
+    [Display(Name = "银联二维码支付")]
+    UnionPayQrCode,
+
+    /// <summary>
+    /// 银联签约支付（签约后免密扣款）
+    /// </summary>
+    [Description("银联签约支付")]
+    [Display(Name = "银联签约支付")]
+    UnionPayContract,
+
+    /// <summary>
+    /// 云闪付无感支付（签约后后台扣款）
+    /// </summary>
+    [Description("云闪付无感支付")]
+    [Display(Name = "云闪付无感支付")]
+    UnionPayQuickPass,
+
+    /// <summary>
+    /// 银联 Apple Pay（基于 Token 的移动端支付）
+    /// </summary>
+    [Description("银联Apple Pay")]
+    [Display(Name = "银联Apple Pay")]
+    UnionPayApplePay,
 }
