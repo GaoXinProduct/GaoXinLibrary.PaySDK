@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations;
+using GaoXinLibrary.PaySDK.Core;
+
 namespace GaoXinLibrary.PaySDK.Wechat.Core;
 
 /// <summary>
@@ -6,24 +9,29 @@ namespace GaoXinLibrary.PaySDK.Wechat.Core;
 public class WechatPayOptions
 {
     /// <summary>应用 ID（公众号/小程序/APP AppID）</summary>
+    [Required(ErrorMessage = "微信支付 AppId 不能为空")]
     public string AppId { get; set; } = string.Empty;
 
     /// <summary>商户号</summary>
+    [Required(ErrorMessage = "微信支付 MchId 不能为空")]
     public string MchId { get; set; } = string.Empty;
 
     /// <summary>
     /// API v3 密钥（32 字节）
     /// <para>用于回调通知解密（AEAD_AES_256_GCM）</para>
     /// </summary>
+    [Required(ErrorMessage = "微信支付 ApiV3Key 不能为空")]
     public string ApiV3Key { get; set; } = string.Empty;
 
     /// <summary>
     /// 商户私钥（PEM 格式，去掉 header/footer 的 Base64）
     /// <para>用于请求签名（SHA256withRSA）</para>
     /// </summary>
+    [Required(ErrorMessage = "微信支付 PrivateKey 不能为空")]
     public string PrivateKey { get; set; } = string.Empty;
 
     /// <summary>商户证书序列号</summary>
+    [Required(ErrorMessage = "微信支付 CertSerialNo 不能为空")]
     public string CertSerialNo { get; set; } = string.Empty;
 
     /// <summary>
@@ -72,4 +80,9 @@ public class WechatPayOptions
     /// <para>若使用旧版平台证书模式，保持默认空值即可。</para>
     /// </summary>
     public string PlatformPublicKeyId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 瞬态故障重试配置（网络抖动、超时、5xx）
+    /// </summary>
+    public PayRetryOptions RetryOptions { get; set; } = new();
 }

@@ -886,12 +886,14 @@ public sealed class PayService : IPayService
     private static CloseOrderResponse CloseUnionPayOrder(CloseOrderRequest req)
     {
         // 银联网关支付模式下，不提供独立的关闭订单 API
-        // 未支付订单会自动超时关闭，此处返回成功以保持统一接口一致性
+        // 未支付订单会自动超时关闭，此处返回模拟成功以保持统一接口一致性
+        // 注意：IsSimulated = true 表示实际并未向银联发送关闭请求
         return new CloseOrderResponse
         {
             Channel = req.Channel,
             OutTradeNo = req.OutTradeNo,
-            Success = true
+            Success = true,
+            IsSimulated = true
         };
     }
 

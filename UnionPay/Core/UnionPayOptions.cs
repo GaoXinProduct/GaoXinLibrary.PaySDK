@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations;
+using GaoXinLibrary.PaySDK.Core;
+
 namespace GaoXinLibrary.PaySDK.UnionPay.Core;
 
 /// <summary>
@@ -7,24 +10,28 @@ namespace GaoXinLibrary.PaySDK.UnionPay.Core;
 public class UnionPayOptions
 {
     /// <summary>商户号（merId）</summary>
+    [Required(ErrorMessage = "银联 MerId 不能为空")]
     public string MerId { get; set; } = string.Empty;
 
     /// <summary>
     /// 商户 RSA 私钥（PEM 格式或 Base64 裸字符串）
     /// <para>用于请求签名（SHA256withRSA）</para>
     /// </summary>
+    [Required(ErrorMessage = "银联 PrivateKey 不能为空")]
     public string PrivateKey { get; set; } = string.Empty;
 
     /// <summary>
     /// 商户证书序列号（certId）
     /// <para>即私钥对应的公钥证书的序列号，放入请求参数</para>
     /// </summary>
+    [Required(ErrorMessage = "银联 CertId 不能为空")]
     public string CertId { get; set; } = string.Empty;
 
     /// <summary>
     /// 银联根证书公钥（PEM）
     /// <para>用于验证银联回调签名</para>
     /// </summary>
+    [Required(ErrorMessage = "银联 UnionPayPublicKey 不能为空")]
     public string UnionPayPublicKey { get; set; } = string.Empty;
 
     /// <summary>
@@ -65,4 +72,9 @@ public class UnionPayOptions
 
     /// <summary>签名方式，01 = RSA，11 = SM2，默认 01</summary>
     public string SignMethod { get; set; } = "01";
+
+    /// <summary>
+    /// 瞫态故障重试配置（网络抖动、超时、5xx）
+    /// </summary>
+    public PayRetryOptions RetryOptions { get; set; } = new();
 }

@@ -36,78 +36,100 @@ public sealed class WechatPayHttpClient
     }
 
     /// <summary>
-    /// GET 请求
+    /// GET 请求（含瞫态故障自动重试）
     /// </summary>
     public async Task<T> GetAsync<T>(string path, CancellationToken ct = default) where T : WechatPayBaseResponse
     {
-        var uri = new Uri(new Uri(_options.BaseUrl), path);
-        var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var uri = new Uri(new Uri(_options.BaseUrl), path);
+            var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
-            request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            request.Headers.Accept.ParseAdd("application/json");
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
+                request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
 
-        using var response = await _httpClient.SendAsync(request, ct);
-        var json = await response.Content.ReadAsStringAsync(ct);
-        VerifyResponseSignature(response, json);
-        return DeserializeAndValidate<T>(json, response.StatusCode);
+            using var response = await _httpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+            VerifyResponseSignature(response, json);
+            return DeserializeAndValidate<T>(json, response.StatusCode);
+        }, ct);
     }
 
     /// <summary>
     /// POST 请求（JSON body）
     /// </summary>
-    public async Task<T> PostAsync<T>(string path, object body, CancellationToken ct = default) where T : WechatPayBaseResponse
+    /// <param name="path">API 路径</param>
+    /// <param name="body">请求体对象</param>
+    /// <param name="idempotencyKey">幂等键（微信支付 v3 <c>Idempotency-Key</c> 请求头），传入后可防止因网络重试导致的重复扣款</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task<T> PostAsync<T>(string path, object body, string? idempotencyKey = null, CancellationToken ct = default) where T : WechatPayBaseResponse
     {
-        var uri = new Uri(new Uri(_options.BaseUrl), path);
-        var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
-        var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var uri = new Uri(new Uri(_options.BaseUrl), path);
+            var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
+            var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri);
-        request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
-            request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
-        request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            request.Headers.Accept.ParseAdd("application/json");
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
+                request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
+            if (!string.IsNullOrEmpty(idempotencyKey))
+                request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
 
-        using var response = await _httpClient.SendAsync(request, ct);
-        var json = await response.Content.ReadAsStringAsync(ct);
-        VerifyResponseSignature(response, json);
-        return DeserializeAndValidate<T>(json, response.StatusCode);
+            using var response = await _httpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+            VerifyResponseSignature(response, json);
+            return DeserializeAndValidate<T>(json, response.StatusCode);
+        }, ct);
     }
 
     /// <summary>
     /// POST 请求（JSON body），无响应包体（204 No Content）
     /// </summary>
-    public async Task PostNoContentAsync(string path, object body, CancellationToken ct = default)
+    /// <param name="path">API 路径</param>
+    /// <param name="body">请求体对象</param>
+    /// <param name="idempotencyKey">幂等键（微信支付 v3 <c>Idempotency-Key</c> 请求头），传入后可防止因网络重试导致的重复操作</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task PostNoContentAsync(string path, object body, string? idempotencyKey = null, CancellationToken ct = default)
     {
-        var uri = new Uri(new Uri(_options.BaseUrl), path);
-        var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
-        var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri);
-        request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
-            request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
-        request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-
-        using var response = await _httpClient.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode)
+        await ExecuteWithRetryAsync(async () =>
         {
-            var errorJson = await response.Content.ReadAsStringAsync(ct);
-            if (!string.IsNullOrWhiteSpace(errorJson))
+            var uri = new Uri(new Uri(_options.BaseUrl), path);
+            var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
+            var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            request.Headers.Accept.ParseAdd("application/json");
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
+                request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
+            if (!string.IsNullOrEmpty(idempotencyKey))
+                request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
             {
-                var err = JsonSerializer.Deserialize<WechatPayBaseResponse>(errorJson, JsonOptions);
-                if (err != null && !string.IsNullOrEmpty(err.Code))
-                    throw new PayException(err.Code, err.Message ?? string.Empty, null);
+                var errorJson = await response.Content.ReadAsStringAsync(ct);
+                if (!string.IsNullOrWhiteSpace(errorJson))
+                {
+                    var err = JsonSerializer.Deserialize<WechatPayBaseResponse>(errorJson, JsonOptions);
+                    if (err != null && !string.IsNullOrEmpty(err.Code))
+                        throw new PayException(err.Code, err.Message ?? string.Empty, null);
+                }
+                throw new PayException("API_ERROR", $"微信支付 API 返回错误，HTTP {(int)response.StatusCode}", null);
             }
-            throw new PayException("API_ERROR", $"微信支付 API 返回错误，HTTP {(int)response.StatusCode}", null);
-        }
+            return true;
+        }, ct);
     }
 
     /// <summary>
@@ -121,45 +143,57 @@ public sealed class WechatPayHttpClient
     /// • 平台证书模式：<c>Wechatpay-Serial</c> = 平台证书序列号
     /// </para>
     /// </summary>
-    public async Task<T> PostWithEncryptionAsync<T>(string path, object body, CancellationToken ct = default) where T : WechatPayBaseResponse
+    /// <param name="path">API 路径</param>
+    /// <param name="body">请求体对象</param>
+    /// <param name="idempotencyKey">幂等键（微信支付 v3 <c>Idempotency-Key</c> 请求头），传入后可防止因网络重试导致的重复操作</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task<T> PostWithEncryptionAsync<T>(string path, object body, string? idempotencyKey = null, CancellationToken ct = default) where T : WechatPayBaseResponse
     {
         var serialNo = _signer.PlatformSerialNo
             ?? throw new PayException("SERVICE_NOT_CONFIGURED", "未配置微信支付公钥或平台证书，无法发送包含加密敏感字段的请求", null);
 
-        var uri = new Uri(new Uri(_options.BaseUrl), path);
-        var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
-        var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var uri = new Uri(new Uri(_options.BaseUrl), path);
+            var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
+            var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri);
-        request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, serialNo);
-        request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            request.Headers.Accept.ParseAdd("application/json");
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, serialNo);
+            if (!string.IsNullOrEmpty(idempotencyKey))
+                request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
 
-        using var response = await _httpClient.SendAsync(request, ct);
-        var json = await response.Content.ReadAsStringAsync(ct);
-        VerifyResponseSignature(response, json);
-        return DeserializeAndValidate<T>(json, response.StatusCode);
+            using var response = await _httpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+            VerifyResponseSignature(response, json);
+            return DeserializeAndValidate<T>(json, response.StatusCode);
+        }, ct);
     }
 
     /// <summary>
-    /// GET 请求，返回原始字节（账单下载使用）
+    /// GET 请求，返回原始字节（账单下载使用，含瞫态故障自动重试）
     /// </summary>
     public async Task<byte[]> GetBytesAsync(string path, CancellationToken ct = default)
     {
-        var uri = new Uri(new Uri(_options.BaseUrl), path);
-        var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var uri = new Uri(new Uri(_options.BaseUrl), path);
+            var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
-            request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            if (_signer.IsPlatformPublicKeyMode && !string.IsNullOrEmpty(_options.PlatformPublicKeyId))
+                request.Headers.TryAddWithoutValidation(WechatPayCallbackHeaders.SerialHeader, _options.PlatformPublicKeyId);
 
-        using var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(ct);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsByteArrayAsync(ct);
+        }, ct);
     }
 
     /// <summary>
@@ -204,5 +238,50 @@ public sealed class WechatPayHttpClient
         }
 
         return result;
+    }
+
+    // ─── 瞫态故障自动重试 ─────────────────────────────────────────────
+
+    /// <summary>
+    /// 执行请求，网络抖动、连接超时、5xx 等瞫态故障时按指数退避自动重试
+    /// </summary>
+    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        var retryOptions = _options.RetryOptions;
+        if (retryOptions is not { MaxRetries: > 0 })
+            return await action();
+
+        var maxRetries = retryOptions.MaxRetries;
+        var delay = retryOptions.InitialDelay;
+        var maxDelay = retryOptions.MaxDelay;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (Exception ex) when (attempt < maxRetries && IsTransientException(ex, ct))
+            {
+                await Task.Delay(delay, ct);
+                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, maxDelay.Ticks));
+            }
+        }
+    }
+
+    /// <summary>
+    /// 判断异常是否为可重试的瞫态故障
+    /// </summary>
+    private static bool IsTransientException(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return false;
+
+        return ex switch
+        {
+            HttpRequestException => true,
+            TaskCanceledException when !ct.IsCancellationRequested => true,
+            _ => false
+        };
     }
 }

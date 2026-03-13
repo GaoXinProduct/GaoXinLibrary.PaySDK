@@ -25,7 +25,7 @@ public sealed class UnionPayHttpClient
     }
 
     /// <summary>
-    /// 向银联后台网关发起 Form POST 请求并返回解析后的键值对响应
+    /// 向银联后台网关发起 Form POST 请求并返回解析后的键值对响应（含瞫态故障自动重试）
     /// </summary>
     public async Task<Dictionary<string, string>> PostBackAsync(
         Dictionary<string, string> parameters,
@@ -35,14 +35,17 @@ public sealed class UnionPayHttpClient
         AddCommonParams(parameters);
         parameters["signature"] = _signer.Sign(parameters);
 
-        var formContent = new FormUrlEncodedContent(parameters);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var formContent = new FormUrlEncodedContent(parameters);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        request.Content = formContent;
-        using var response = await _httpClient.SendAsync(request, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
-        return ParseFormResponse(body);
+            using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            request.Content = formContent;
+            using var response = await _httpClient.SendAsync(request, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            return ParseFormResponse(body);
+        }, ct);
     }
 
     /// <summary>
@@ -87,7 +90,7 @@ public sealed class UnionPayHttpClient
     }
 
     /// <summary>
-    /// 下载文件（对账文件下载）
+    /// 下载文件（对账文件下载，含瞫态故障自动重试）
     /// </summary>
     public async Task<byte[]> DownloadFileAsync(
         Dictionary<string, string> parameters,
@@ -97,13 +100,16 @@ public sealed class UnionPayHttpClient
         AddCommonParams(parameters);
         parameters["signature"] = _signer.Sign(parameters);
 
-        var formContent = new FormUrlEncodedContent(parameters);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var formContent = new FormUrlEncodedContent(parameters);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        request.Content = formContent;
-        using var response = await _httpClient.SendAsync(request, ct);
-        return await response.Content.ReadAsByteArrayAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            request.Content = formContent;
+            using var response = await _httpClient.SendAsync(request, ct);
+            return await response.Content.ReadAsByteArrayAsync(ct);
+        }, ct);
     }
 
     private void AddCommonParams(Dictionary<string, string> parameters)
@@ -131,5 +137,44 @@ public sealed class UnionPayHttpClient
             result[key] = val;
         }
         return result;
+    }
+
+    // ─── 瞫态故障自动重试 ─────────────────────────────────────────────
+
+    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        var retryOptions = _options.RetryOptions;
+        if (retryOptions is not { MaxRetries: > 0 })
+            return await action();
+
+        var maxRetries = retryOptions.MaxRetries;
+        var delay = retryOptions.InitialDelay;
+        var maxDelay = retryOptions.MaxDelay;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (Exception ex) when (attempt < maxRetries && IsTransientException(ex, ct))
+            {
+                await Task.Delay(delay, ct);
+                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, maxDelay.Ticks));
+            }
+        }
+    }
+
+    private static bool IsTransientException(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return false;
+
+        return ex switch
+        {
+            HttpRequestException => true,
+            TaskCanceledException when !ct.IsCancellationRequested => true,
+            _ => false
+        };
     }
 }

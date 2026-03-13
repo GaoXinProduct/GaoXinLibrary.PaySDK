@@ -30,14 +30,14 @@ public sealed class WechatPayService : IWechatPayService
     public async Task<WechatJsapiOrderResponse> CreateJsapiOrderAsync(WechatJsapiOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatJsapiOrderResponse>("/v3/pay/transactions/jsapi", request, ct);
+        return await _http.PostAsync<WechatJsapiOrderResponse>("/v3/pay/transactions/jsapi", request, ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task<WechatAppOrderResponse> CreateAppOrderAsync(WechatAppOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatAppOrderResponse>("/v3/pay/transactions/app", request, ct);
+        return await _http.PostAsync<WechatAppOrderResponse>("/v3/pay/transactions/app", request, ct: ct);
     }
 
     /// <inheritdoc/>
@@ -56,7 +56,7 @@ public sealed class WechatPayService : IWechatPayService
                 "H5 下单必须设置 RedirectUrl（支付完成后跳转地址），请通过 WechatH5OrderRequest.RedirectUrl 或 WechatPayOptions.H5RedirectUrl 配置",
                 nameof(request));
 
-        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct);
+        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct: ct);
 
         // 拼接 redirect_url：支付完成后跳转指定页面
         if (!string.IsNullOrEmpty(resp.H5Url))
@@ -72,21 +72,21 @@ public sealed class WechatPayService : IWechatPayService
     public async Task<WechatNativeOrderResponse> CreateNativeOrderAsync(WechatNativeOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatNativeOrderResponse>("/v3/pay/transactions/native", request, ct);
+        return await _http.PostAsync<WechatNativeOrderResponse>("/v3/pay/transactions/native", request, ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task<WechatMiniProgramOrderResponse> CreateMiniProgramOrderAsync(WechatMiniProgramOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatMiniProgramOrderResponse>("/v3/pay/transactions/jsapi", request, ct);
+        return await _http.PostAsync<WechatMiniProgramOrderResponse>("/v3/pay/transactions/jsapi", request, ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task CloseOrderAsync(string outTradeNo, CancellationToken ct = default)
     {
         var body = new { mchid = _options.MchId };
-        await _http.PostNoContentAsync($"/v3/pay/transactions/out-trade-no/{Uri.EscapeDataString(outTradeNo)}/close", body, ct);
+        await _http.PostNoContentAsync($"/v3/pay/transactions/out-trade-no/{Uri.EscapeDataString(outTradeNo)}/close", body, ct: ct);
     }
 
     /// <inheritdoc/>
@@ -106,7 +106,7 @@ public sealed class WechatPayService : IWechatPayService
     {
         if (string.IsNullOrEmpty(request.NotifyUrl) && !string.IsNullOrEmpty(_options.RefundNotifyUrl))
             request.NotifyUrl = _options.RefundNotifyUrl;
-        return await _http.PostAsync<WechatRefundResponse>("/v3/refund/domestic/refunds", request, ct);
+        return await _http.PostAsync<WechatRefundResponse>("/v3/refund/domestic/refunds", request, ct: ct);
     }
 
     /// <inheritdoc/>
@@ -274,7 +274,7 @@ public sealed class WechatPayService : IWechatPayService
 
         var refundId = Uri.EscapeDataString(request.RefundId);
         return await _http.PostWithEncryptionAsync<WechatAbnormalRefundResponse>(
-            $"/v3/refund/domestic/refunds/{refundId}/apply-abnormal-refund", request, ct);
+            $"/v3/refund/domestic/refunds/{refundId}/apply-abnormal-refund", request, ct: ct);
     }
 
     /// <inheritdoc/>

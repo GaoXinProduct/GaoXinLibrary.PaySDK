@@ -30,6 +30,11 @@
   - [敏感信息加解密](#敏感信息加解密)
   - [平台证书管理](#平台证书管理)
 - [银联跨境电商海关申报](#银联跨境电商海关申报)
+- [进阶用法](#进阶用法)
+  - [瞬态故障自动重试](#瞬态故障自动重试)
+  - [幂等重试支持](#幂等重试支持微信支付-v3)
+  - [JSON 序列化工具](#json-序列化工具)
+  - [配置验证](#配置验证)
 - [配置选项参考](#配置选项参考)
 - [错误处理](#错误处理)
 - [项目结构](#项目结构)
@@ -70,7 +75,7 @@
 | 实名认证 | — | — | ✅ |
 | 文件传输（对账文件下载） | — | — | ✅ |
 
-> *银联关闭订单：银联网关支付未支付订单自动超时关闭，SDK 的统一接口返回成功以保持一致性。
+> *银联关闭订单：银联网关支付未支付订单自动超时关闭，SDK 的统一接口返回 `Success=true` + `IsSimulated=true` 以保持一致性，调用方可通过 `IsSimulated` 标记识别。
 
 ---
 
@@ -508,7 +513,20 @@ var result = await pay.CloseOrderAsync(new CloseOrderRequest
     OutTradeNo = "order_001"
 });
 // result.Success: true
+// result.IsSimulated: false（微信/支付宝为实际关闭）
+
+// 银联网关支付不提供关闭订单 API，未支付订单会自动超时关闭
+// SDK 返回 Success=true + IsSimulated=true 以保持统一接口一致性
+var unionResult = await pay.CloseOrderAsync(new CloseOrderRequest
+{
+    Channel    = PayChannel.UnionPayGateway,
+    OutTradeNo = "order_012"
+});
+// unionResult.Success:     true
+// unionResult.IsSimulated: true（未实际调用银联 API）
 ```
+
+> **`IsSimulated` 标记说明**：当 `IsSimulated == true` 时，表示 SDK 为保持接口一致性而返回的模拟成功，实际并未向支付平台发送关闭请求。调用方可根据此标记决定是否记录警告日志或做额外处理。
 
 ### 下载账单
 
@@ -543,13 +561,17 @@ byte[] unionCsv = await pay.DownloadBillAsync(new DownloadBillRequest
 > **⚠️ JSON 序列化中文显示提示**
 >
 > 使用 `JsonSerializer.Serialize()` 序列化回调对象时，默认会将中文转义为 `\uXXXX`（如 `\u652F\u4ED8\u6210\u529F`）。
-> 若需要日志或响应中正确显示中文，请使用 `WechatPayHttpClient.JsonOptions`（已配置 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`）：
+> 推荐使用 SDK 内置的 `PayJsonSerializer` 工具类（已配置 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` + snake_case）：
 >
 > ```csharp
 > // ❌ 中文会显示为 \uXXXX
 > var json = JsonSerializer.Serialize(order);
 >
-> // ✅ 中文正常显示
+> // ✅ 推荐：使用 PayJsonSerializer（跨渠道通用）
+> using GaoXinLibrary.PaySDK.Core;
+> var json = PayJsonSerializer.Serialize(order);
+>
+> // ✅ 也可使用 WechatPayHttpClient.JsonOptions（仅微信支付场景）
 > using GaoXinLibrary.PaySDK.Wechat.Core;
 > var json = JsonSerializer.Serialize(order, WechatPayHttpClient.JsonOptions);
 > ```
@@ -1268,6 +1290,143 @@ var fileResp = await client.Customs.FileTransferAsync(new UnionPayFileTransferRe
 
 ---
 
+## 进阶用法
+
+### 瞬态故障自动重试
+
+SDK 内置了瞬态故障自动重试机制，当遇到网络抖动、连接超时、服务端 5xx 等临时性故障时，会按指数退避策略自动重试。此机制适用于所有三个支付渠道（微信支付、支付宝、银联）。
+
+**可重试的故障类型：**
+- 网络层错误（连接失败、DNS 解析失败等 `HttpRequestException`）
+- HTTP 请求超时（`TaskCanceledException`，非用户主动取消）
+- 服务端错误（HTTP 5xx 状态码）
+
+**配置参数 — `PayRetryOptions`：**
+
+| 属性 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `MaxRetries` | `int` | `2` | 最大重试次数（不含首次请求），设为 0 则不重试 |
+| `InitialDelay` | `TimeSpan` | 500ms | 首次重试前的等待时间，后续按指数退避递增 |
+| `MaxDelay` | `TimeSpan` | 5s | 单次重试等待时间上限 |
+
+```csharp
+// 使用默认重试配置（2 次重试，500ms 起始延迟，指数退避）
+builder.Services.AddWechatPay(opt =>
+{
+    opt.AppId        = "wx_your_appid";
+    opt.MchId        = "1600000000";
+    opt.ApiV3Key     = "your_api_v3_key";
+    opt.PrivateKey   = "your_private_key";
+    opt.CertSerialNo = "your_serial_no";
+    // RetryOptions 默认已启用，无需额外配置
+});
+
+// 自定义重试策略
+builder.Services.AddAlipay(opt =>
+{
+    opt.AppId           = "2021000000000000";
+    opt.PrivateKey      = "your_private_key";
+    opt.AlipayPublicKey = "alipay_public_key";
+    opt.RetryOptions = new PayRetryOptions
+    {
+        MaxRetries   = 3,                              // 最多重试 3 次
+        InitialDelay = TimeSpan.FromMilliseconds(200),  // 首次重试等待 200ms
+        MaxDelay     = TimeSpan.FromSeconds(10)          // 单次最多等待 10s
+    };
+});
+
+// 禁用重试
+builder.Services.AddUnionPay(opt =>
+{
+    opt.MerId             = "your_mer_id";
+    opt.CertId            = "your_cert_id";
+    opt.PrivateKey        = "your_private_key";
+    opt.UnionPayPublicKey = "unionpay_public_key";
+    opt.RetryOptions = new PayRetryOptions { MaxRetries = 0 };
+});
+```
+
+### 幂等重试支持（微信支付 v3）
+
+微信支付 v3 接口支持 `Idempotency-Key` 请求头，用于防止因网络重试导致的重复扣款。SDK 在所有 POST 方法中暴露了可选的 `idempotencyKey` 参数：
+
+```csharp
+// 通过独立接口使用幂等键
+public class WechatController(IWechatPayService wechat)
+{
+    public async Task<WechatNativeOrderResponse> SafeCreateOrder()
+    {
+        // 使用商户订单号作为幂等键，确保同一订单不会重复创建
+        var orderId = "order_001";
+        var resp = await wechat.CreateNativeOrderAsync(new WechatNativeOrderRequest
+        {
+            OutTradeNo  = orderId,
+            Description = "商品描述",
+            Amount      = new WechatPayAmount { Total = 100 }
+        });
+        return resp;
+    }
+}
+```
+
+> **💡 说明**：`Idempotency-Key` 在 `WechatPayHttpClient` 的 `PostAsync`、`PostNoContentAsync`、`PostWithEncryptionAsync` 方法中均可通过参数传入。瞬态重试机制独立于幂等键工作 — 瞬态重试针对的是网络层故障（在请求未到达微信服务器时安全重试），而幂等键则保护已到达服务器的请求不被重复处理。
+
+### JSON 序列化工具
+
+`PayJsonSerializer` 提供 SDK 预配置的 JSON 序列化选项，适用于所有支付渠道的日志记录、调试输出等场景：
+
+```csharp
+using GaoXinLibrary.PaySDK.Core;
+
+// 序列化（中文不会被转义为 \uXXXX，使用 snake_case 命名）
+var json = PayJsonSerializer.Serialize(myObject);
+
+// 反序列化
+var obj = PayJsonSerializer.Deserialize<MyModel>(json);
+
+// 直接获取 JsonSerializerOptions 用于自定义场景
+var options = PayJsonSerializer.Options;
+```
+
+**预配置选项：**
+- 命名策略：`JsonNamingPolicy.SnakeCaseLower`（自动 snake_case）
+- 空值处理：`JsonIgnoreCondition.WhenWritingNull`（忽略 null 字段）
+- 编码器：`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`（中文直接输出，不做 Unicode 转义）
+
+### 配置验证
+
+SDK 在 DI 注册时会自动校验必填配置项。所有 Options 类的必填属性均标注了 `[Required]` 特性，注册时通过 `Validator.ValidateObject` 提前验证，而不是等到第一次 API 调用时才报错：
+
+```csharp
+// ❌ 缺少必填项，注册时立即抛出 ValidationException
+builder.Services.AddWechatPay(opt =>
+{
+    opt.AppId = "wx_appid";
+    // 未设置 MchId、ApiV3Key、PrivateKey、CertSerialNo
+});
+// 抛出: ValidationException: "微信支付 MchId 不能为空"
+
+// ✅ 所有必填项已配置
+builder.Services.AddWechatPay(opt =>
+{
+    opt.AppId        = "wx_appid";
+    opt.MchId        = "1600000000";
+    opt.ApiV3Key     = "your_api_v3_key";
+    opt.PrivateKey   = "your_private_key";
+    opt.CertSerialNo = "your_serial_no";
+});
+```
+
+各渠道必填项：
+
+| 渠道 | 必填属性 |
+|------|----------|
+| 微信支付 | `AppId`、`MchId`、`ApiV3Key`、`PrivateKey`、`CertSerialNo` |
+| 支付宝 | `AppId`、`PrivateKey`、`AlipayPublicKey` |
+| 银联 | `MerId`、`PrivateKey`、`CertId`、`UnionPayPublicKey` |
+
+---
+
 ## 配置选项参考
 
 ### WechatPayOptions
@@ -1285,6 +1444,7 @@ var fileResp = await client.Customs.FileTransferAsync(new UnionPayFileTransferRe
 | `RefundNotifyUrl` | string | — | 退款结果异步通知回调地址，配置后退款请求自动携带，也可在退款时覆盖 |
 | `BaseUrl` | string | — | API 基础地址，默认 `https://api.mch.weixin.qq.com` |
 | `HttpTimeout` | TimeSpan | — | HTTP 超时，默认 30 秒 |
+| `RetryOptions` | `PayRetryOptions` | — | 瞬态故障重试配置（默认 2 次重试，500ms 起始延迟），详见[瞬态故障自动重试](#瞬态故障自动重试) |
 
 ### AlipayOptions
 
@@ -1298,6 +1458,7 @@ var fileResp = await client.Customs.FileTransferAsync(new UnionPayFileTransferRe
 | `SignType` | string | — | 签名类型，默认 `RSA2` |
 | `GatewayUrl` | string | — | 网关地址，默认 `https://openapi.alipay.com/gateway.do` |
 | `HttpTimeout` | TimeSpan | — | HTTP 超时，默认 30 秒 |
+| `RetryOptions` | `PayRetryOptions` | — | 瞬态故障重试配置（默认 2 次重试，500ms 起始延迟），详见[瞬态故障自动重试](#瞬态故障自动重试) |
 
 ### UnionPayOptions
 
@@ -1316,6 +1477,9 @@ var fileResp = await client.Customs.FileTransferAsync(new UnionPayFileTransferRe
 | `FileGatewayUrl` | string | — | 文件下载网关，默认 `https://filedownload.95516.com/` |
 | `Version` | string | — | 版本号，默认 `5.1.0` |
 | `SignMethod` | string | — | 签名方式，`01`=RSA / `11`=SM2，默认 `01` |
+| `RetryOptions` | `PayRetryOptions` | — | 瞬态故障重试配置（默认 2 次重试，500ms 起始延迟），详见[瞬态故障自动重试](#瞬态故障自动重试) |
+
+> **💡 配置验证**：所有标注为 ✅ 必填的属性均在 DI 注册时通过 `[Required]` + `Validator.ValidateObject` 自动校验，缺失时立即抛出 `ValidationException`，而非等到首次 API 调用时才报错。
 
 ---
 
@@ -1356,6 +1520,8 @@ GaoXinLibrary.PaySDK/
 │   ├── PayChannel.cs               # 渠道枚举（17 种子渠道，含 Apple Pay）
 │   ├── PayChannelExtensions.cs     # 渠道枚举扩展方法
 │   ├── PayException.cs             # 基础异常
+│   ├── PayRetryOptions.cs          # 瞬态故障重试配置（指数退避）
+│   ├── PayJsonSerializer.cs        # 统一 JSON 序列化工具
 │   ├── CreateOrderRequest.cs       # 创建订单请求
 │   ├── CreateOrderResponse.cs      # 创建订单响应
 │   ├── QueryOrderRequest.cs        # 查询订单请求
@@ -1365,7 +1531,7 @@ GaoXinLibrary.PaySDK/
 │   ├── QueryRefundRequest.cs       # 退款查询请求
 │   ├── QueryRefundResponse.cs      # 退款查询响应
 │   ├── CloseOrderRequest.cs        # 关闭订单请求
-│   ├── CloseOrderResponse.cs       # 关闭订单响应
+│   ├── CloseOrderResponse.cs       # 关闭订单响应（含 IsSimulated 标记）
 │   ├── DownloadBillRequest.cs      # 账单下载请求
 │   ├── PayCallbackResult.cs        # 回调解析结果
 │   └── WechatJsPayParams.cs        # 微信 JS 调起支付参数

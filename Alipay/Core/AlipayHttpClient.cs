@@ -35,32 +35,35 @@ public sealed class AlipayHttpClient
     }
 
     /// <summary>
-    /// 执行支付宝网关 API 请求（Form POST），返回反序列化后的响应
+    /// 执行支付宝网关 API 请求（Form POST），返回反序列化后的响应（含瞫态故障自动重试）
     /// </summary>
     /// <param name="extra">需要合并到公共参数的额外外层参数（如 notify_url）</param>
     public async Task<T> ExecuteAsync<T>(string method, object bizContent, CancellationToken ct = default, Dictionary<string, string>? extra = null)
         where T : AlipayBaseResponse
     {
-        var bizContentJson = JsonSerializer.Serialize(bizContent, JsonOptions);
-        var parameters = BuildCommonParameters(method, bizContentJson, extra);
-        var signContent = BuildSignContent(parameters);
-        parameters["sign"] = _signer.Sign(signContent);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            var bizContentJson = JsonSerializer.Serialize(bizContent, JsonOptions);
+            var parameters = BuildCommonParameters(method, bizContentJson, extra);
+            var signContent = BuildSignContent(parameters);
+            parameters["sign"] = _signer.Sign(signContent);
 
-        var formContent = new FormUrlEncodedContent(parameters);
-        formContent.Headers.ContentType!.CharSet = "utf-8";
+            var formContent = new FormUrlEncodedContent(parameters);
+            formContent.Headers.ContentType!.CharSet = "utf-8";
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, _options.GatewayUrl);
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        request.Content = formContent;
-        using var response = await _httpClient.SendAsync(request, ct);
-        var responseBytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var charSet = response.Content.Headers.ContentType?.CharSet?.Trim('"') ?? "utf-8";
-        Encoding encoding;
-        try { encoding = Encoding.GetEncoding(charSet); }
-        catch { encoding = Encoding.UTF8; }
-        var responseJson = encoding.GetString(responseBytes);
+            using var request = new HttpRequestMessage(HttpMethod.Post, _options.GatewayUrl);
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            request.Content = formContent;
+            using var response = await _httpClient.SendAsync(request, ct);
+            var responseBytes = await response.Content.ReadAsByteArrayAsync(ct);
+            var charSet = response.Content.Headers.ContentType?.CharSet?.Trim('"') ?? "utf-8";
+            Encoding encoding;
+            try { encoding = Encoding.GetEncoding(charSet); }
+            catch { encoding = Encoding.UTF8; }
+            var responseJson = encoding.GetString(responseBytes);
 
-        return ParseResponse<T>(method, responseJson);
+            return ParseResponse<T>(method, responseJson);
+        }, ct);
     }
 
     /// <summary>
@@ -164,15 +167,18 @@ public sealed class AlipayHttpClient
     }
 
     /// <summary>
-    /// 下载外部资源字节（账单下载使用，复用内部 HttpClient）
+    /// 下载外部资源字节（账单下载使用，复用内部 HttpClient，含瞫态故障自动重试）
     /// </summary>
     public async Task<byte[]> DownloadBytesAsync(string url, CancellationToken ct = default)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
-        using var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(ct);
+        return await ExecuteWithRetryAsync(async () =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsByteArrayAsync(ct);
+        }, ct);
     }
 
     private static T ParseResponse<T>(string method, string responseJson) where T : AlipayBaseResponse
@@ -207,5 +213,44 @@ public sealed class AlipayHttpClient
         }
 
         return result;
+    }
+
+    // ─── 瞫态故障自动重试 ─────────────────────────────────────────────
+
+    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        var retryOptions = _options.RetryOptions;
+        if (retryOptions is not { MaxRetries: > 0 })
+            return await action();
+
+        var maxRetries = retryOptions.MaxRetries;
+        var delay = retryOptions.InitialDelay;
+        var maxDelay = retryOptions.MaxDelay;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await action();
+            }
+            catch (Exception ex) when (attempt < maxRetries && IsTransientException(ex, ct))
+            {
+                await Task.Delay(delay, ct);
+                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, maxDelay.Ticks));
+            }
+        }
+    }
+
+    private static bool IsTransientException(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return false;
+
+        return ex switch
+        {
+            HttpRequestException => true,
+            TaskCanceledException when !ct.IsCancellationRequested => true,
+            _ => false
+        };
     }
 }

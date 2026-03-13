@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using GaoXinLibrary.PaySDK.Core;
 using GaoXinLibrary.PaySDK.UnionPay;
 using GaoXinLibrary.PaySDK.UnionPay.Core;
@@ -48,6 +49,7 @@ public static class UnionPayServiceCollectionExtensions
         UnionPayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        Validator.ValidateObject(options, new ValidationContext(options), validateAllProperties: true);
 
         services.TryAddSingleton(options);
 

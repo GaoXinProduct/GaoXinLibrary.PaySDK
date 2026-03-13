@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using GaoXinLibrary.PaySDK.Alipay;
 using GaoXinLibrary.PaySDK.Alipay.Core;
 using GaoXinLibrary.PaySDK.Alipay.Services;
@@ -45,6 +46,7 @@ public static class AlipayServiceCollectionExtensions
         AlipayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        Validator.ValidateObject(options, new ValidationContext(options), validateAllProperties: true);
 
         services.TryAddSingleton(options);
 

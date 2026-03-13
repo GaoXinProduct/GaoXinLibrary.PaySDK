@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using GaoXinLibrary.PaySDK.Core;
 using GaoXinLibrary.PaySDK.Wechat;
 using GaoXinLibrary.PaySDK.Wechat.Core;
@@ -51,6 +52,7 @@ public static class WechatPayServiceCollectionExtensions
         WechatPayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        Validator.ValidateObject(options, new ValidationContext(options), validateAllProperties: true);
 
         services.TryAddSingleton(options);
 
