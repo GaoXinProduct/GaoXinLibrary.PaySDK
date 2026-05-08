@@ -60,6 +60,7 @@ public interface IPayService
     /// <param name="channel">支付渠道</param>
     /// <param name="requestBody">原始请求体字符串</param>
     /// <param name="headers">HTTP 请求头（微信支付验签需要）</param>
+    /// <param name="ct">取消令牌</param>
     /// <returns>解析后的回调结果</returns>
-    Task<PayCallbackResult> ParseCallbackAsync(PayChannel channel, string requestBody, IDictionary<string, string>? headers = null);
+    Task<PayCallbackResult> ParseCallbackAsync(PayChannel channel, string requestBody, IDictionary<string, string>? headers = null, CancellationToken ct = default);
 }

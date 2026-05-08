@@ -95,6 +95,24 @@ public interface IAlipayService
     Task<AlipayTradeRefundQueryResponse> QueryRefundAsync(AlipayTradeRefundQueryContent bizContent, CancellationToken ct = default);
 
     /// <summary>
+    /// 绑定分账关系
+    /// <para>alipay.trade.royalty.relation.bind</para>
+    /// </summary>
+    Task<AlipayTradeRoyaltyRelationBindResponse> BindRoyaltyRelationAsync(AlipayTradeRoyaltyRelationBindContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 发起订单分账
+    /// <para>alipay.trade.order.settle</para>
+    /// </summary>
+    Task<AlipayTradeOrderSettleResponse> SettleOrderAsync(AlipayTradeOrderSettleContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 商家转账
+    /// <para>alipay.fund.trans.uni.transfer</para>
+    /// </summary>
+    Task<AlipayFundTransUniTransferResponse> TransferAsync(AlipayFundTransUniTransferContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
     /// 获取账单下载 URL，然后下载并返回 CSV 字节
     /// <para>alipay.data.dataservice.bill.downloadurl.query</para>
     /// </summary>

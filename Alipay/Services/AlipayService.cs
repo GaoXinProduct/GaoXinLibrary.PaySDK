@@ -124,12 +124,27 @@ public sealed class AlipayService : IAlipayService
         => await _http.ExecuteAsync<AlipayTradeRefundQueryResponse>("alipay.trade.fastpay.refund.query", bizContent, ct);
 
     /// <inheritdoc/>
+    public async Task<AlipayTradeRoyaltyRelationBindResponse> BindRoyaltyRelationAsync(AlipayTradeRoyaltyRelationBindContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeRoyaltyRelationBindResponse>("alipay.trade.royalty.relation.bind", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayTradeOrderSettleResponse> SettleOrderAsync(AlipayTradeOrderSettleContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeOrderSettleResponse>("alipay.trade.order.settle", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayFundTransUniTransferResponse> TransferAsync(AlipayFundTransUniTransferContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayFundTransUniTransferResponse>("alipay.fund.trans.uni.transfer", bizContent, ct);
+
+    /// <inheritdoc/>
     public async Task<byte[]> DownloadBillAsync(AlipayBillDownloadContent bizContent, CancellationToken ct = default)
     {
         var resp = await _http.ExecuteAsync<AlipayBillDownloadResponse>("alipay.data.dataservice.bill.downloadurl.query", bizContent, ct);
 
         if (string.IsNullOrEmpty(resp.BillDownloadUrl))
             throw new Core.AlipayException("EMPTY_BILL_URL", "支付宝账单下载地址为空");
+
+        if (!TryValidateBillDownloadUrl(resp.BillDownloadUrl, out var invalidReason))
+            throw new Core.AlipayException("INVALID_BILL_URL", invalidReason ?? "支付宝账单下载地址不合法");
 
         return await _http.DownloadBytesAsync(resp.BillDownloadUrl, ct);
     }
@@ -193,4 +208,40 @@ public sealed class AlipayService : IAlipayService
 
     private static string GetValue(Dictionary<string, string> dict, string key, string defaultValue = "")
         => dict.TryGetValue(key, out var v) ? v : defaultValue;
+
+    private bool TryValidateBillDownloadUrl(string downloadUrl, out string? reason)
+    {
+        reason = null;
+        if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri))
+        {
+            reason = "支付宝账单下载地址不是合法绝对 URL";
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            reason = "支付宝账单下载地址必须为 HTTPS";
+            return false;
+        }
+
+        if (_options.AllowedBillDownloadHostSuffixes.Count == 0)
+            return true;
+
+        var host = uri.Host.ToLowerInvariant();
+        var matched = _options.AllowedBillDownloadHostSuffixes.Any(suffix =>
+        {
+            if (string.IsNullOrWhiteSpace(suffix))
+                return false;
+            var normalized = suffix.Trim().TrimStart('.').ToLowerInvariant();
+            return host == normalized || host.EndsWith($".{normalized}", StringComparison.Ordinal);
+        });
+
+        if (!matched)
+        {
+            reason = $"支付宝账单下载地址主机不在白名单内：{uri.Host}";
+            return false;
+        }
+
+        return true;
+    }
 }

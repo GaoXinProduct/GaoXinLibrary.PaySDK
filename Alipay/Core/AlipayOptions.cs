@@ -53,6 +53,16 @@ public class AlipayOptions
     /// <summary>支付宝网关地址，默认正式环境</summary>
     public string GatewayUrl { get; set; } = "https://openapi.alipay.com/gateway.do";
 
+    /// <summary>
+    /// 账单下载允许的主机后缀白名单。
+    /// <para>用于校验 <c>alipay.data.dataservice.bill.downloadurl.query</c> 返回的下载链接，避免误下载到非支付宝域名。</para>
+    /// </summary>
+    public List<string> AllowedBillDownloadHostSuffixes { get; set; } =
+    [
+        "alipay.com",
+        "alipayobjects.com"
+    ];
+
     /// <summary>HTTP 请求超时时间，默认 30 秒</summary>
     public TimeSpan HttpTimeout { get; set; } = TimeSpan.FromSeconds(30);
 

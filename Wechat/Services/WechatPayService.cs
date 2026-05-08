@@ -30,14 +30,22 @@ public sealed class WechatPayService : IWechatPayService
     public async Task<WechatJsapiOrderResponse> CreateJsapiOrderAsync(WechatJsapiOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatJsapiOrderResponse>("/v3/pay/transactions/jsapi", request, ct: ct);
+        return await _http.PostAsync<WechatJsapiOrderResponse>(
+            "/v3/pay/transactions/jsapi",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutTradeNo),
+            ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task<WechatAppOrderResponse> CreateAppOrderAsync(WechatAppOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatAppOrderResponse>("/v3/pay/transactions/app", request, ct: ct);
+        return await _http.PostAsync<WechatAppOrderResponse>(
+            "/v3/pay/transactions/app",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutTradeNo),
+            ct: ct);
     }
 
     /// <inheritdoc/>
@@ -56,7 +64,11 @@ public sealed class WechatPayService : IWechatPayService
                 "H5 下单必须设置 RedirectUrl（支付完成后跳转地址），请通过 WechatH5OrderRequest.RedirectUrl 或 WechatPayOptions.H5RedirectUrl 配置",
                 nameof(request));
 
-        var resp = await _http.PostAsync<WechatH5OrderResponse>("/v3/pay/transactions/h5", request, ct: ct);
+        var resp = await _http.PostAsync<WechatH5OrderResponse>(
+            "/v3/pay/transactions/h5",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutTradeNo),
+            ct: ct);
 
         // 拼接 redirect_url：支付完成后跳转指定页面
         if (!string.IsNullOrEmpty(resp.H5Url))
@@ -72,21 +84,33 @@ public sealed class WechatPayService : IWechatPayService
     public async Task<WechatNativeOrderResponse> CreateNativeOrderAsync(WechatNativeOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatNativeOrderResponse>("/v3/pay/transactions/native", request, ct: ct);
+        return await _http.PostAsync<WechatNativeOrderResponse>(
+            "/v3/pay/transactions/native",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutTradeNo),
+            ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task<WechatMiniProgramOrderResponse> CreateMiniProgramOrderAsync(WechatMiniProgramOrderRequest request, CancellationToken ct = default)
     {
         FillCommonFields(request);
-        return await _http.PostAsync<WechatMiniProgramOrderResponse>("/v3/pay/transactions/jsapi", request, ct: ct);
+        return await _http.PostAsync<WechatMiniProgramOrderResponse>(
+            "/v3/pay/transactions/jsapi",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutTradeNo),
+            ct: ct);
     }
 
     /// <inheritdoc/>
     public async Task CloseOrderAsync(string outTradeNo, CancellationToken ct = default)
     {
         var body = new { mchid = _options.MchId };
-        await _http.PostNoContentAsync($"/v3/pay/transactions/out-trade-no/{Uri.EscapeDataString(outTradeNo)}/close", body, ct: ct);
+        await _http.PostNoContentAsync(
+            $"/v3/pay/transactions/out-trade-no/{Uri.EscapeDataString(outTradeNo)}/close",
+            body,
+            idempotencyKey: BuildIdempotencyKey(outTradeNo),
+            ct: ct);
     }
 
     /// <inheritdoc/>
@@ -106,13 +130,21 @@ public sealed class WechatPayService : IWechatPayService
     {
         if (string.IsNullOrEmpty(request.NotifyUrl) && !string.IsNullOrEmpty(_options.RefundNotifyUrl))
             request.NotifyUrl = _options.RefundNotifyUrl;
-        return await _http.PostAsync<WechatRefundResponse>("/v3/refund/domestic/refunds", request, ct: ct);
+        var response = await _http.PostAsync<WechatRefundResponse>(
+            "/v3/refund/domestic/refunds",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutRefundNo),
+            ct: ct);
+        DecryptRefundSensitiveFields(response);
+        return response;
     }
 
     /// <inheritdoc/>
     public async Task<WechatRefundQueryResponse> QueryRefundAsync(string outRefundNo, CancellationToken ct = default)
     {
-        return await _http.GetAsync<WechatRefundQueryResponse>($"/v3/refund/domestic/refunds/{Uri.EscapeDataString(outRefundNo)}", ct);
+        var response = await _http.GetAsync<WechatRefundQueryResponse>($"/v3/refund/domestic/refunds/{Uri.EscapeDataString(outRefundNo)}", ct);
+        DecryptRefundSensitiveFields(response);
+        return response;
     }
 
     /// <inheritdoc/>
@@ -273,8 +305,13 @@ public sealed class WechatPayService : IWechatPayService
             request.RealName = _signer.EncryptSensitiveField(request.RealName);
 
         var refundId = Uri.EscapeDataString(request.RefundId);
-        return await _http.PostWithEncryptionAsync<WechatAbnormalRefundResponse>(
-            $"/v3/refund/domestic/refunds/{refundId}/apply-abnormal-refund", request, ct: ct);
+        var response = await _http.PostWithEncryptionAsync<WechatAbnormalRefundResponse>(
+            $"/v3/refund/domestic/refunds/{refundId}/apply-abnormal-refund",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutRefundNo),
+            ct: ct);
+        DecryptRefundSensitiveFields(response);
+        return response;
     }
 
     /// <inheritdoc/>
@@ -284,4 +321,42 @@ public sealed class WechatPayService : IWechatPayService
     /// <inheritdoc/>
     public string DecryptSensitiveField(string cipherText)
         => _signer.DecryptSensitiveField(cipherText);
+
+    private static string? BuildIdempotencyKey(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+            return null;
+        return source.Trim();
+    }
+
+    private void DecryptRefundSensitiveFields(WechatRefundResponse response)
+    {
+        response.UserReceivedAccount = TryDecryptSensitiveField(response.UserReceivedAccount);
+    }
+
+    private void DecryptRefundSensitiveFields(WechatRefundQueryResponse response)
+    {
+        response.UserReceivedAccount = TryDecryptSensitiveField(response.UserReceivedAccount);
+    }
+
+    private void DecryptRefundSensitiveFields(WechatAbnormalRefundResponse response)
+    {
+        response.UserReceivedAccount = TryDecryptSensitiveField(response.UserReceivedAccount) ?? response.UserReceivedAccount;
+    }
+
+    private string? TryDecryptSensitiveField(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        try
+        {
+            return _signer.DecryptSensitiveField(value);
+        }
+        catch
+        {
+            // 兼容微信返回明文/掩码场景，无法解密时保持原值返回。
+            return value;
+        }
+    }
 }

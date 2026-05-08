@@ -55,6 +55,7 @@ public sealed class AlipayHttpClient
             request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
             request.Content = formContent;
             using var response = await _httpClient.SendAsync(request, ct);
+            EnsureTransientStatusHandled(response.StatusCode, "支付宝网关请求失败");
             var responseBytes = await response.Content.ReadAsByteArrayAsync(ct);
             var charSet = response.Content.Headers.ContentType?.CharSet?.Trim('"') ?? "utf-8";
             Encoding encoding;
@@ -176,6 +177,7 @@ public sealed class AlipayHttpClient
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
             using var response = await _httpClient.SendAsync(request, ct);
+            EnsureTransientStatusHandled(response.StatusCode, "支付宝账单下载失败");
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsByteArrayAsync(ct);
         }, ct);
@@ -248,9 +250,16 @@ public sealed class AlipayHttpClient
 
         return ex switch
         {
-            HttpRequestException => true,
+            HttpRequestException httpEx => httpEx.StatusCode is null || (int)httpEx.StatusCode >= 500,
             TaskCanceledException when !ct.IsCancellationRequested => true,
             _ => false
         };
+    }
+
+    private static void EnsureTransientStatusHandled(System.Net.HttpStatusCode statusCode, string message)
+    {
+        if ((int)statusCode < 500)
+            return;
+        throw new HttpRequestException($"{message}，HTTP {(int)statusCode}", null, statusCode);
     }
 }

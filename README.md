@@ -74,8 +74,11 @@
 | 加密公钥更新查询 | — | — | ✅ |
 | 实名认证 | — | — | ✅ |
 | 文件传输（对账文件下载） | — | — | ✅ |
+| 商家分账（关系绑定/订单分账） | — | ✅ | — |
+| 商家转账 | — | ✅ | — |
+| OpenAPI 独立模块（OAuth2/非对称） | — | — | ✅（新增） |
 
-> *银联关闭订单：银联网关支付未支付订单自动超时关闭，SDK 的统一接口返回 `Success=true` + `IsSimulated=true` 以保持一致性，调用方可通过 `IsSimulated` 标记识别。
+> *银联关闭订单：银联网关支付未支付订单自动超时关闭，SDK 的统一接口返回 `Success=true` + `IsSimulated=true`，并且 `OperationMode=Simulated` 以保持一致性，调用方可通过该字段识别是否真实调用了平台接口。
 
 ---
 
@@ -524,9 +527,10 @@ var unionResult = await pay.CloseOrderAsync(new CloseOrderRequest
 });
 // unionResult.Success:     true
 // unionResult.IsSimulated: true（未实际调用银联 API）
+// unionResult.OperationMode: Simulated（可机读识别模拟语义）
 ```
 
-> **`IsSimulated` 标记说明**：当 `IsSimulated == true` 时，表示 SDK 为保持接口一致性而返回的模拟成功，实际并未向支付平台发送关闭请求。调用方可根据此标记决定是否记录警告日志或做额外处理。
+> **`IsSimulated` / `OperationMode` 标记说明**：当 `IsSimulated == true` 或 `OperationMode == Simulated` 时，表示 SDK 为保持接口一致性而返回的模拟成功，实际并未向支付平台发送关闭请求。调用方可根据该字段决定是否记录警告日志或做额外处理。
 
 ### 下载账单
 
@@ -759,7 +763,7 @@ public class WechatController(IWechatPayService wechat)
     public string EncryptField(string plainText)
         => wechat.EncryptSensitiveField(plainText);
 
-    // 手动解密（用于微信支付下行的加密敏感字段）
+    // 手动解密（用于自定义场景的下行加密敏感字段）
     public string DecryptField(string cipherText)
         => wechat.DecryptSensitiveField(cipherText);
 
@@ -777,6 +781,8 @@ public class WechatController(IWechatPayService wechat)
         => wechat.RegisterCertificate(serialNo, certPem);
 }
 ```
+
+> **自动解密说明**：`RefundAsync`、`QueryRefundAsync`、`ApplyAbnormalRefundAsync` 返回的 `UserReceivedAccount` 已自动尝试解密。若平台返回明文或掩码，SDK 会保留原值并继续返回，不会抛异常。
 
 ### 支付宝独立接口
 
@@ -925,6 +931,61 @@ public class AlipayController(IAlipayService alipay)
         var result = alipay.ParseCallback(formParams);
         // result.IsValid / result.TradeStatus / result.OutTradeNo / result.TradeNo
         return result;
+    }
+}
+```
+
+### 支付宝扩展能力（分账 / 转账）
+
+```csharp
+public class AlipayAdvancedController(IAlipayService alipay)
+{
+    // 1) 绑定分账关系（一次绑定，多次分账）
+    public async Task BindRoyaltyAsync()
+    {
+        await alipay.BindRoyaltyRelationAsync(new AlipayTradeRoyaltyRelationBindContent
+        {
+            OutRequestNo = "royalty_bind_001",
+            TransOut = "2088xxxxxx_out",
+            TransIn = "2088xxxxxx_in",
+            TransInType = "userId",
+            Type = "transfer",
+            Desc = "平台分账关系"
+        });
+    }
+
+    // 2) 对已支付订单发起分账
+    public async Task SettleAsync(string outTradeNo)
+    {
+        await alipay.SettleOrderAsync(new AlipayTradeOrderSettleContent
+        {
+            OutTradeNo = outTradeNo,
+            OutRequestNo = $"settle_{outTradeNo}",
+            RoyaltyParameters =
+            [
+                new AlipayRoyaltyDetail
+                {
+                    TransIn = "2088xxxxxx_in",
+                    TransInType = "userId",
+                    Amount = "0.30",
+                    Desc = "平台服务费"
+                }
+            ]
+        });
+    }
+
+    // 3) 商家转账
+    public async Task TransferAsync()
+    {
+        await alipay.TransferAsync(new AlipayFundTransUniTransferContent
+        {
+            OutBizNo = "transfer_001",
+            TransAmount = "1.00",
+            PayeeInfoIdentity = "2088xxxxxx_user",
+            PayeeInfoIdentityType = "ALIPAY_USER_ID",
+            BizScene = "DIRECT_TRANSFER",
+            Remark = "活动补贴"
+        });
     }
 }
 ```
@@ -1290,6 +1351,41 @@ var fileResp = await client.Customs.FileTransferAsync(new UnionPayFileTransferRe
 
 ---
 
+## 银联 OpenAPI 独立模块（OAuth2 / 非对称）
+
+银联 OpenAPI 与收单交易接口不是同一能力域。SDK 已提供独立的 `IUnionPayOpenApiService` 与 `AddUnionPayOpenApi`，避免把 OpenAPI 认证流程（OAuth2/非对称）与支付下单接口耦合在一起。
+
+```csharp
+// Program.cs
+builder.Services.AddUnionPayOpenApi(opt =>
+{
+    opt.BaseUrl = "https://openapi.unionpay.com";
+    opt.AppId = "your_openapi_appid";
+
+    // 二选一：
+    // 1) OAuth2
+    // opt.AuthMode = UnionPayOpenApiAuthMode.OAuth2;
+    // opt.OAuthToken = "your_access_token";
+
+    // 2) 非对称验签（RSA2）
+    opt.AuthMode = UnionPayOpenApiAuthMode.Asymmetric;
+    opt.PrivateKey = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----";
+});
+
+// 使用
+public class UnionPayOpenApiController(IUnionPayOpenApiService openApi)
+{
+    public async Task<string> QueryDemoAsync()
+    {
+        return await openApi.PostAsync("your.biz.method", new { foo = "bar" });
+    }
+}
+```
+
+> 该模块定位为 OpenAPI 认证与请求骨架，不改变现有收单支付接口行为。你可以在其上按产品文档逐步扩展具体 OpenAPI 能力。
+
+---
+
 ## 进阶用法
 
 ### 瞬态故障自动重试
@@ -1370,6 +1466,26 @@ public class WechatController(IWechatPayService wechat)
 ```
 
 > **💡 说明**：`Idempotency-Key` 在 `WechatPayHttpClient` 的 `PostAsync`、`PostNoContentAsync`、`PostWithEncryptionAsync` 方法中均可通过参数传入。瞬态重试机制独立于幂等键工作 — 瞬态重试针对的是网络层故障（在请求未到达微信服务器时安全重试），而幂等键则保护已到达服务器的请求不被重复处理。
+
+### 统一日志追踪（推荐）
+
+`PayService` 已补充统一日志字段，建议在业务层补齐 `requestId` 并在落单/回调时记录以下字段：`channel`、`outTradeNo`、`requestId`、`tradeStatus`、`errorCode`。
+
+```csharp
+// Program.cs
+app.Use(async (ctx, next) =>
+{
+    var requestId = ctx.Request.Headers.TryGetValue("X-Request-Id", out var v) && !string.IsNullOrWhiteSpace(v)
+        ? v.ToString()
+        : Guid.NewGuid().ToString("N");
+
+    ctx.Items["requestId"] = requestId;
+    ctx.Response.Headers["X-Request-Id"] = requestId;
+    await next();
+});
+```
+
+> 建议在 Controller 中将 `channel/outTradeNo/tradeStatus/errorCode` 与 `requestId` 一并写入结构化日志，便于对账和问题排查。
 
 ### JSON 序列化工具
 
@@ -1511,6 +1627,21 @@ catch (PayException ex)
 
 ---
 
+## 能力边界（支持 / 不支持 / 规划中）
+
+| 分类 | 能力 | 状态 | 说明 |
+|------|------|------|------|
+| 微信支付 | JSAPI/APP/H5/Native/小程序、退款、退款查询、回调验签解密 | ✅ | 已支持 |
+| 微信支付 | 异常退款、平台证书下载注册、敏感字段加解密 | ✅ | 已支持 |
+| 支付宝 | 收单核心链路（当面付/预下单/JSAPI/App/WAP/Page） | ✅ | 已支持 |
+| 支付宝 | 分账关系绑定、订单分账、商家转账 | ✅ | 本版本新增 |
+| 支付宝 | 投诉/风控 API（交易投诉、RiskGO） | 🚧 | 规划中，按业务优先级扩展 |
+| 银联 | 收单交易、退款、查询、回调、海关申报 | ✅ | 已支持 |
+| 银联 | OpenAPI 独立模块（OAuth2/非对称认证骨架） | ✅ | 本版本新增 |
+| 银联 | OpenAPI 具体产品 API（按产品逐项封装） | 🚧 | 规划中，建议按业务申请逐步接入 |
+
+---
+
 ## 项目结构
 
 ```
@@ -1546,6 +1677,9 @@ GaoXinLibrary.PaySDK/
 ├── Alipay/                          # 支付宝
 │   ├── Core/                        # AlipayOptions / AlipaySigner / AlipayHttpClient
 │   ├── Models/                      # 所有支付宝请求/响应模型
+│   │   ├── AlipayTradeRoyaltyRelationBindContent.cs  # 分账关系绑定
+│   │   ├── AlipayTradeOrderSettleContent.cs          # 订单分账
+│   │   ├── AlipayFundTransUniTransferContent.cs      # 商家转账
 │   ├── Services/                    # IAlipayService / AlipayService
 │   └── AlipayClient.cs             # 非 DI 场景的客户端入口
 ├── UnionPay/                        # 银联
@@ -1563,12 +1697,17 @@ GaoXinLibrary.PaySDK/
 │   ├── Services/                    # IUnionPayService / UnionPayService
 │   │   ├── IUnionPayCustomsService.cs  # 海关申报接口（非支付）
 │   │   └── UnionPayCustomsService.cs   # 海关申报实现
+│   ├── OpenApi/                     # 银联 OpenAPI（OAuth2/非对称）独立模块
+│   │   ├── UnionPayOpenApiOptions.cs
+│   │   ├── IUnionPayOpenApiService.cs
+│   │   └── UnionPayOpenApiService.cs
 │   └── UnionPayClient.cs           # 非 DI 场景的客户端入口（Pay + Customs）
 ├── Extensions/                      # DI 注入扩展方法
 │   ├── PayServiceCollectionExtensions.cs      # AddPaySDK / AddPayService
 │   ├── WechatPayServiceCollectionExtensions.cs # AddWechatPay
 │   ├── AlipayServiceCollectionExtensions.cs    # AddAlipay
-│   └── UnionPayServiceCollectionExtensions.cs  # AddUnionPay
+│   ├── UnionPayServiceCollectionExtensions.cs  # AddUnionPay
+│   └── UnionPayOpenApiServiceCollectionExtensions.cs  # AddUnionPayOpenApi
 └── PayService.cs                    # IPayService 统一路由实现
 ```
 

@@ -18,6 +18,12 @@ public class CloseOrderResponse
     public bool Success { get; set; }
 
     /// <summary>
+    /// 关闭操作模式。
+    /// <para>Actual 表示已调用支付平台；Simulated 表示 SDK 模拟返回。</para>
+    /// </summary>
+    public CloseOrderOperationMode OperationMode { get; set; } = CloseOrderOperationMode.Actual;
+
+    /// <summary>
     /// 是否为模拟成功（即平台本身不支持关闭订单 API，SDK 为保持接口一致性而返回成功）
     /// <para>当此值为 <c>true</c> 时，表示实际并未向支付平台发送关闭请求。
     /// 例如银联网关支付不提供独立的关闭订单接口，未支付订单会自动超时关闭。</para>
@@ -26,4 +32,16 @@ public class CloseOrderResponse
 
     /// <summary>原始响应（JSON 字符串）</summary>
     public string? RawResponse { get; set; }
+}
+
+/// <summary>
+/// 关闭订单操作模式
+/// </summary>
+public enum CloseOrderOperationMode : byte
+{
+    /// <summary>实际调用了支付平台关闭接口</summary>
+    Actual = 0,
+
+    /// <summary>SDK 为统一语义返回的模拟结果</summary>
+    Simulated = 1
 }

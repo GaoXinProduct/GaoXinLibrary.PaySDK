@@ -43,6 +43,7 @@ public sealed class UnionPayHttpClient
             request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
             request.Content = formContent;
             using var response = await _httpClient.SendAsync(request, ct);
+            EnsureTransientStatusHandled(response.StatusCode, "银联后台请求失败");
             var body = await response.Content.ReadAsStringAsync(ct);
             return ParseFormResponse(body);
         }, ct);
@@ -108,6 +109,8 @@ public sealed class UnionPayHttpClient
             request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
             request.Content = formContent;
             using var response = await _httpClient.SendAsync(request, ct);
+            EnsureTransientStatusHandled(response.StatusCode, "银联文件下载请求失败");
+            response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsByteArrayAsync(ct);
         }, ct);
     }
@@ -172,9 +175,16 @@ public sealed class UnionPayHttpClient
 
         return ex switch
         {
-            HttpRequestException => true,
+            HttpRequestException httpEx => httpEx.StatusCode is null || (int)httpEx.StatusCode >= 500,
             TaskCanceledException when !ct.IsCancellationRequested => true,
             _ => false
         };
+    }
+
+    private static void EnsureTransientStatusHandled(System.Net.HttpStatusCode statusCode, string message)
+    {
+        if ((int)statusCode < 500)
+            return;
+        throw new HttpRequestException($"{message}，HTTP {(int)statusCode}", null, statusCode);
     }
 }
