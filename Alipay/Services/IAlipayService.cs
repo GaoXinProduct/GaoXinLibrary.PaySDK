@@ -22,20 +22,25 @@ public interface IAlipayService
     /// JSAPI / 小程序支付（统一收单交易创建，返回 trade_no，前端调用 JS SDK 唤起支付）
     /// <para>alipay.trade.create</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="notifyUrl">异步通知地址，为 null 时使用 <see cref="Core.AlipayOptions.NotifyUrl"/></param>
+    /// <param name="ct">取消令牌</param>
     Task<AlipayTradeCreateResponse> CreateOrderAsync(AlipayTradeCreateContent bizContent, string? notifyUrl = null, CancellationToken ct = default);
 
     /// <summary>
     /// 订单码支付（预下单，生成商家二维码让用户扫码）
     /// <para>alipay.trade.precreate</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="notifyUrl">异步通知地址，为 null 时使用 <see cref="Core.AlipayOptions.NotifyUrl"/></param>
+    /// <param name="ct">取消令牌</param>
     Task<AlipayTradePrecreateResponse> PrecreateAsync(AlipayTradePrecreateContent bizContent, string? notifyUrl = null, CancellationToken ct = default);
 
     /// <summary>
     /// App 支付（返回 SDK 签名字符串，给客户端 SDK 调起支付）
     /// <para>alipay.trade.app.pay</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="notifyUrl">异步通知地址，为 null 时使用 <see cref="Core.AlipayOptions.NotifyUrl"/></param>
     string BuildAppPayString(AlipayTradeAppPayContent bizContent, string? notifyUrl = null);
 
@@ -43,6 +48,7 @@ public interface IAlipayService
     /// 手机网站支付（返回 HTTP 302 跳转 URL，引导用户在浏览器中完成支付）
     /// <para>alipay.trade.wap.pay</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="notifyUrl">异步通知地址，为 null 时使用 <see cref="Core.AlipayOptions.NotifyUrl"/></param>
     /// <param name="returnUrl">同步跳转地址，为 null 时使用 <see cref="Core.AlipayOptions.ReturnUrl"/></param>
     string BuildWapPayUrl(AlipayTradeWapPayContent bizContent, string? notifyUrl = null, string? returnUrl = null);
@@ -51,6 +57,7 @@ public interface IAlipayService
     /// 电脑网站支付（返回表单 GET URL，前端直接跳转）
     /// <para>alipay.trade.page.pay</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="notifyUrl">异步通知地址，为 null 时使用 <see cref="Core.AlipayOptions.NotifyUrl"/></param>
     /// <param name="returnUrl">同步跳转地址，为 null 时使用 <see cref="Core.AlipayOptions.ReturnUrl"/></param>
     string BuildPagePayUrl(AlipayTradePagePayContent bizContent, string? notifyUrl = null, string? returnUrl = null);
@@ -67,6 +74,7 @@ public interface IAlipayService
     /// 关闭订单（未支付状态下取消或超时后调用）
     /// <para>alipay.trade.close</para>
     /// </summary>
+    /// <param name="bizContent">业务请求参数</param>
     /// <param name="ignoreNotExist">
     /// 为 <c>true</c> 时：若支付宝返回 <c>ACQ.TRADE_NOT_EXIST</c>，视为幂等关闭成功（不抛异常）。<br/>
     /// 适用于 <b>App / 手机网站 / 电脑网站支付</b>：这三种方式仅在本地生成支付链接，
@@ -74,6 +82,7 @@ public interface IAlipayService
     /// 为 <c>false</c>（默认）时：交易不存在将抛出 <see cref="Core.AlipayException"/>，
     /// 适用于 <b>当面付 / 订单码（precreate）</b> 等调用 API 即立即创建交易的场景。
     /// </param>
+    /// <param name="ct">取消令牌</param>
     Task<AlipayTradeCloseResponse> CloseOrderAsync(AlipayTradeCloseContent bizContent, bool ignoreNotExist = false, CancellationToken ct = default);
 
     /// <summary>
@@ -113,6 +122,36 @@ public interface IAlipayService
     Task<AlipayFundTransUniTransferResponse> TransferAsync(AlipayFundTransUniTransferContent bizContent, CancellationToken ct = default);
 
     /// <summary>
+    /// 分账查询
+    /// <para>alipay.trade.order.settle.query</para>
+    /// </summary>
+    Task<AlipayTradeOrderSettleQueryResponse> QuerySettleOrderAsync(AlipayTradeOrderSettleQueryContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 分账关系批量查询
+    /// <para>alipay.trade.royalty.relation.batchquery</para>
+    /// </summary>
+    Task<AlipayTradeRoyaltyRelationBatchQueryResponse> QueryRoyaltyRelationAsync(AlipayTradeRoyaltyRelationBatchQueryContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 资金转账查询
+    /// <para>alipay.fund.trans.common.query</para>
+    /// </summary>
+    Task<AlipayFundTransCommonQueryResponse> QueryTransferAsync(AlipayFundTransCommonQueryContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 交易投诉查询
+    /// <para>alipay.merchant.tradecomplain.batchquery</para>
+    /// </summary>
+    Task<AlipayTradeComplainQueryResponse> QueryComplaintsAsync(AlipayTradeComplainQueryContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
+    /// 交易投诉反馈
+    /// <para>alipay.merchant.tradecomplain.feedback</para>
+    /// </summary>
+    Task<AlipayTradeComplainFeedbackResponse> FeedbackComplaintAsync(AlipayTradeComplainFeedbackContent bizContent, CancellationToken ct = default);
+
+    /// <summary>
     /// 获取账单下载 URL，然后下载并返回 CSV 字节
     /// <para>alipay.data.dataservice.bill.downloadurl.query</para>
     /// </summary>
@@ -126,7 +165,7 @@ public interface IAlipayService
     AlipayCallbackParams ParseCallback(IDictionary<string, string> formParams);
 
     /// <summary>
-    /// 解析并验签支付宝异步通知（直接传入 <see cref="IFormCollection"/> 或任意
+    /// 解析并验签支付宝异步通知（直接传入 <see cref="Microsoft.AspNetCore.Http.IFormCollection"/> 或任意
     /// <see cref="IEnumerable{T}"/> of <see cref="KeyValuePair{TKey,TValue}"/> 形式的表单数据）
     /// </summary>
     /// <param name="formParams">ASP.NET Core <c>Request.Form</c> 或等价键值序列</param>

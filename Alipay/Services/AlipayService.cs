@@ -136,6 +136,26 @@ public sealed class AlipayService : IAlipayService
         => await _http.ExecuteAsync<AlipayFundTransUniTransferResponse>("alipay.fund.trans.uni.transfer", bizContent, ct);
 
     /// <inheritdoc/>
+    public async Task<AlipayTradeOrderSettleQueryResponse> QuerySettleOrderAsync(AlipayTradeOrderSettleQueryContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeOrderSettleQueryResponse>("alipay.trade.order.settle.query", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayTradeRoyaltyRelationBatchQueryResponse> QueryRoyaltyRelationAsync(AlipayTradeRoyaltyRelationBatchQueryContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeRoyaltyRelationBatchQueryResponse>("alipay.trade.royalty.relation.batchquery", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayFundTransCommonQueryResponse> QueryTransferAsync(AlipayFundTransCommonQueryContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayFundTransCommonQueryResponse>("alipay.fund.trans.common.query", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayTradeComplainQueryResponse> QueryComplaintsAsync(AlipayTradeComplainQueryContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeComplainQueryResponse>("alipay.merchant.tradecomplain.batchquery", bizContent, ct);
+
+    /// <inheritdoc/>
+    public async Task<AlipayTradeComplainFeedbackResponse> FeedbackComplaintAsync(AlipayTradeComplainFeedbackContent bizContent, CancellationToken ct = default)
+        => await _http.ExecuteAsync<AlipayTradeComplainFeedbackResponse>("alipay.merchant.tradecomplain.feedback", bizContent, ct);
+
+    /// <inheritdoc/>
     public async Task<byte[]> DownloadBillAsync(AlipayBillDownloadContent bizContent, CancellationToken ct = default)
     {
         var resp = await _http.ExecuteAsync<AlipayBillDownloadResponse>("alipay.data.dataservice.bill.downloadurl.query", bizContent, ct);
