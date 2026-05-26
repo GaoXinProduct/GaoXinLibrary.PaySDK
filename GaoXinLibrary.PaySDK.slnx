@@ -1,6 +1,6 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/GaoXinLibrary.PaySDK/GaoXinLibrary.PaySDK.csproj" />
+    <Project Path="src/GaoXinLibrary.PaySDK.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GaoXinLibrary.PaySDK.Tests/GaoXinLibrary.PaySDK.Tests.csproj" />
