@@ -29,15 +29,31 @@
   - [异常退款](#异常退款)
   - [敏感信息加解密](#敏感信息加解密)
   - [平台证书管理](#平台证书管理)
+  - [合单支付](#合单支付)
+  - [分账](#分账)
+  - [商家转账到零钱](#商家转账到零钱)
+- [支付宝扩展能力](#支付宝扩展能力分账--转账)
+  - [分账查询与关系查询](#分账查询与关系查询)
+  - [转账查询](#转账查询)
+  - [交易投诉查询与反馈](#交易投诉查询与反馈)
+- [银联独立接口](#银联独立接口)
+  - [消费撤销](#消费撤销)
+  - [预授权](#预授权)
+  - [代收代付](#代收代付)
 - [银联跨境电商海关申报](#银联跨境电商海关申报)
 - [进阶用法](#进阶用法)
   - [瞬态故障自动重试](#瞬态故障自动重试)
   - [幂等重试支持](#幂等重试支持微信支付-v3)
+  - [沙箱环境](#沙箱环境)
+  - [分布式追踪](#分布式追踪)
+  - [健康检查](#健康检查)
   - [JSON 序列化工具](#json-序列化工具)
   - [配置验证](#配置验证)
 - [配置选项参考](#配置选项参考)
 - [错误处理](#错误处理)
+- [能力边界](#能力边界支持--不支持--规划中)
 - [项目结构](#项目结构)
+- [单元测试](#单元测试)
 
 ---
 
@@ -76,7 +92,21 @@
 | 文件传输（对账文件下载） | — | — | ✅ |
 | 商家分账（关系绑定/订单分账） | — | ✅ | — |
 | 商家转账 | — | ✅ | — |
-| OpenAPI 独立模块（OAuth2/非对称） | — | — | ✅（新增） |
+| 合单支付 | ✅ | — | — |
+| 分账申请/查询/退回 | ✅ | — | — |
+| 商家转账到零钱 | ✅ | — | — |
+| 分账查询 | — | ✅ | — |
+| 分账关系批量查询 | — | ✅ | — |
+| 转账查询 | — | ✅ | — |
+| 交易投诉查询/反馈 | — | ✅ | — |
+| 消费撤销 | — | — | ✅ |
+| 预授权申请/撤销/完成/完成撤销 | — | — | ✅ |
+| 代收 | — | — | ✅ |
+| 代付/付款到银行卡 | — | — | ✅ |
+| OpenAPI 独立模块（OAuth2/非对称） | — | — | ✅ |
+| 健康检查（IHealthCheck） | ✅ | ✅ | ✅ |
+| 分布式追踪（OpenTelemetry） | ✅ | ✅ | ✅ |
+| 沙箱环境（Sandbox） | ✅ | ✅ | ✅ |
 
 > *银联关闭订单：银联网关支付未支付订单自动超时关闭，SDK 的统一接口返回 `Success=true` + `IsSimulated=true`，并且 `OperationMode=Simulated` 以保持一致性，调用方可通过该字段识别是否真实调用了平台接口。
 
@@ -643,6 +673,145 @@ public async Task<IActionResult> UnionPayNotify([FromServices] IPayService pay)
 
 ---
 
+## 回调防重放最佳实践
+
+支付平台均使用异步通知机制推送回调，但**网络不可靠**：通知可能重复投递或延迟到达。业务系统必须在回调处理层实现**幂等处理**，避免重复发货、重复退款。
+
+### 通用原则
+
+1. **先验签，再幂等判断** — 签名无效直接拒绝，不进入业务逻辑。
+2. **以平台单号为主键去重** — 每个支付订单的 `transaction_id` / `notify_id` / `queryId` 在支付周期内唯一。
+3. **去重存储必须原子化** — 使用数据库唯一索引或分布式锁（Redis `SETNX`），避免竞态条件。
+4. **老通知直接丢弃** — 通知时间戳明显过期（超过合理窗口），丢弃后主动查询最新状态。
+5. **处理成功返回对应格式** — 微信返回 JSON、支付宝返回 `success`、银联返回 `ok`；返回了错误格式可能导致平台持续重发。
+
+### 微信支付：时间戳窗口 + 签名唯一性
+
+微信支付 v3 回调的三个签名头 `Wechatpay-Timestamp` / `Wechatpay-Nonce` / `Wechatpay-Signature` 本身就是防重放机制：nonce 在 5 分钟内有效，配合签名确保请求未被篡改。
+
+```csharp
+[HttpPost("wechat/notify")]
+public async Task<IActionResult> WechatNotify([FromServices] IPayService pay)
+{
+    using var reader = new StreamReader(Request.Body);
+    var body = await reader.ReadToEndAsync();
+
+    var headers = new Dictionary<string, string>
+    {
+        ["Wechatpay-Timestamp"] = Request.Headers["Wechatpay-Timestamp"].ToString(),
+        ["Wechatpay-Nonce"]     = Request.Headers["Wechatpay-Nonce"].ToString(),
+        ["Wechatpay-Signature"] = Request.Headers["Wechatpay-Signature"].ToString(),
+        ["Wechatpay-Serial"]    = Request.Headers["Wechatpay-Serial"].ToString()
+    };
+
+    // 步骤 1: 验签（SDK 内置，验证时间戳窗口 + 签名）
+    var result = await pay.ParseCallbackAsync(PayChannel.WechatJsapi, body, headers);
+    if (!result.IsValid)
+        return BadRequest();
+
+    // 步骤 2: 以 transaction_id 为主键做幂等处理
+    var transactionId = result.TransactionId!;
+    var idempotencyKey = $"wxpay_cb_{transactionId}";
+
+    // 使用数据库唯一索引或 Redis SETNX 确保只处理一次
+    if (!await TryAcquireIdempotencyLockAsync(idempotencyKey, TimeSpan.FromDays(7)))
+        return Ok(new { code = "SUCCESS", message = "已处理" }); // 重复通知，直接返回成功
+
+    try
+    {
+        // 步骤 3: 业务处理（发货、更新订单状态等）
+        await ProcessOrderAsync(result.OutTradeNo, result.TransactionId, result.TradeStatus);
+    }
+    finally
+    {
+        // 步骤 4: 成功后释放锁（或保持锁防止后续重复通知重新处理）
+    }
+
+    // 步骤 5: 必须返回此格式，否则微信会持续重发
+    return Ok(new { code = "SUCCESS", message = "成功" });
+}
+```
+
+> **微信支付通知重试策略**：若商户未在 5 秒内返回 `{"code":"SUCCESS","message":"成功"}`，微信支付会按 15s/15s/30s/3m/10m/20m/30m/30m/30m/60m/3h/3h/6h/6h 间隔重试，最长持续 24 小时。因此幂等处理必须可靠。
+
+### 支付宝：notify_id 去重
+
+支付宝异步通知使用 `notify_id` 作为去重标识，每个通知的 `notify_id` 全局唯一。
+
+```csharp
+[HttpPost("alipay/notify")]
+public async Task<IActionResult> AlipayNotify([FromServices] IPayService pay)
+{
+    var form = Request.Form.ToDictionary(k => k.Key, v => v.Value.ToString());
+    var formString = string.Join("&",
+        form.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+
+    // 步骤 1: 验签
+    var result = await pay.ParseCallbackAsync(PayChannel.AlipayPage, formString);
+    if (!result.IsValid)
+        return BadRequest();
+
+    // 步骤 2: 获取 notify_id 并去重
+    if (!form.TryGetValue("notify_id", out var notifyId) || string.IsNullOrEmpty(notifyId))
+        return BadRequest();
+
+    if (!await TryAcquireIdempotencyLockAsync($"alipay_cb_{notifyId}", TimeSpan.FromDays(7)))
+        return Content("success", "text/plain"); // 重复通知
+
+    try
+    {
+        await ProcessOrderAsync(result.OutTradeNo, result.TransactionId, result.TradeStatus);
+    }
+    finally { }
+
+    return Content("success", "text/plain");
+}
+```
+
+> **支付宝 async_req 主动查询**：支付宝异步通知不携带 `biz_content`，只包含 `notify_type=fund_auth_freeze` 等提示信息。此时应使用 `notify_type` 识别事件，主动调用查询接口 (`alipay.trade.query`) 确认订单状态，详见 [支付宝异步通知说明](https://opendocs.alipay.com/open/270/105902)。
+
+### 银联：orderId + queryId 联合去重
+
+银联回调采用 `queryId`（交易流水号）作为主去重键，每次交易的 `queryId` 唯一。`orderId`（商户订单号）可作为辅助校验。
+
+```csharp
+[HttpPost("unionpay/notify")]
+public async Task<IActionResult> UnionPayNotify([FromServices] IPayService pay)
+{
+    var form = Request.Form.ToDictionary(k => k.Key, v => v.Value.ToString());
+    var formString = string.Join("&",
+        form.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+
+    // 步骤 1: 验签
+    var result = await pay.ParseCallbackAsync(PayChannel.UnionPayGateway, formString);
+    if (!result.IsValid)
+        return BadRequest();
+
+    // 步骤 2: 以 queryId 为主键做幂等处理
+    var queryId = result.TransactionId!;
+    if (!await TryAcquireIdempotencyLockAsync($"unionpay_cb_{queryId}", TimeSpan.FromDays(7)))
+        return Content("ok", "text/plain"); // 重复通知
+
+    try
+    {
+        await ProcessOrderAsync(result.OutTradeNo, queryId, result.TradeStatus);
+    }
+    finally { }
+
+    return Content("ok", "text/plain");
+}
+```
+
+### 建议的去重存储实现
+
+| 存储方案 | 实现方式 | 适用场景 |
+|---------|---------|---------|
+| 数据库唯一索引 | `INSERT INTO callback_log (notify_id, status, created_at) VALUES (@id, 'processing', NOW())` — 依赖唯一索引抛异常回滚 | 小型项目，已有数据库 |
+| Redis `SETNX` | `SET alipay_cb_{notify_id} 1 NX EX 604800` — 原子操作，自动过期 | 高并发，建议 7 天过期 |
+| ConcurrentDictionary | 仅适合单体应用、单实例、重启后丢失的场景 | 开发/测试环境 |
+
+---
+
 ## 渠道独立接口
 
 除了统一 `IPayService`，你也可以直接注入各渠道独立接口获得更精细的控制。
@@ -990,6 +1159,91 @@ public class AlipayAdvancedController(IAlipayService alipay)
 }
 ```
 
+### 分账查询与关系查询
+
+```csharp
+public class AlipaySettleQueryController(IAlipayService alipay)
+{
+    // 分账查询（通过分账请求号或交易号查询分账结果）
+    public async Task<AlipayTradeOrderSettleQueryResponse> QuerySettleOrderAsync()
+    {
+        return await alipay.QuerySettleOrderAsync(new AlipayTradeOrderSettleQueryContent
+        {
+            OutRequestNo = "settle_order_001"  // 分账请求号
+            // 或 TradeNo = "2021xxxxxx"       // 支付宝交易号
+        });
+        // resp.RoyaltyDetailList: 分账明细列表
+    }
+
+    // 分账关系批量查询（查询已绑定的分账接收方列表）
+    public async Task<AlipayTradeRoyaltyRelationBatchQueryResponse> QueryRoyaltyRelationAsync()
+    {
+        return await alipay.QueryRoyaltyRelationAsync(new AlipayTradeRoyaltyRelationBatchQueryContent
+        {
+            PageNum  = 1,      // 页码
+            PageSize = 20      // 每页条数
+        });
+        // resp.ReceiverList: 分账接收方列表
+        // resp.TotalPageNum / resp.CurrentPageNum: 分页信息
+    }
+}
+```
+
+### 转账查询
+
+```csharp
+public class AlipayTransferQueryController(IAlipayService alipay)
+{
+    // 查询转账结果（alipay.fund.trans.common.query）
+    public async Task<AlipayFundTransCommonQueryResponse> QueryTransferAsync()
+    {
+        return await alipay.QueryTransferAsync(new AlipayFundTransCommonQueryContent
+        {
+            OutBizNo    = "transfer_001",       // 商户转账单号
+            // 或 OrderId = "2021xxxxxx"        // 支付宝转账单据号
+            BizScene    = "DIRECT_TRANSFER"     // 业务场景
+        });
+        // resp.Status: SUCCESS / FAIL / PROCESSING
+        // resp.Amount / resp.PayeeInfo / resp.OrderFee
+    }
+}
+```
+
+### 交易投诉查询与反馈
+
+```csharp
+public class AlipayComplainController(IAlipayService alipay)
+{
+    // 批量查询交易投诉列表
+    public async Task<AlipayTradeComplainQueryResponse> QueryComplaintsAsync()
+    {
+        return await alipay.QueryComplaintsAsync(new AlipayTradeComplainQueryContent
+        {
+            Status    = "WAIT_FEEDBACK",          // 投诉状态：WAIT_FEEDBACK / FEEDBACKED
+            PageNum   = 1,
+            PageSize  = 20,
+            StartTime = "2025-01-01 00:00:00",
+            EndTime   = "2025-06-01 23:59:59"
+        });
+        // resp.ComplainList: 投诉列表
+        // resp.TotalNum / resp.PageNum: 分页信息
+    }
+
+    // 提交投诉反馈
+    public async Task<AlipayTradeComplainFeedbackResponse> FeedbackComplaintAsync(
+        string complainEventId, string content)
+    {
+        return await alipay.FeedbackComplaintAsync(new AlipayTradeComplainFeedbackContent
+        {
+            ComplainEventId = complainEventId,            // 支付宝侧投诉单号
+            Content         = content,                     // 反馈内容（最多 200 字）
+            Images          = "img_id_1,img_id_2"          // 凭证图片 ID（可选，逗号分隔）
+        });
+        // resp.ResultCode: "SUCCESS" = 反馈提交成功
+    }
+}
+```
+
 ### 银联独立接口
 
 ```csharp
@@ -1135,6 +1389,109 @@ public class UnionPayController(IUnionPayService unionPay)
         // result.IsValid / result.RespCode / result.OrderId / result.QueryId
         return result;
     }
+
+    // ── 消费撤销 ──────────────────────────────────────────────
+    // 撤销已完成的消费交易（仅限当日交易），发起前需确认订单状态
+    public async Task<UnionPayConsumeUndoResponse> ConsumeUndoAsync(
+        string orgQueryId, int txnAmt)
+    {
+        return await unionPay.ConsumeUndoAsync(new UnionPayConsumeUndoRequest
+        {
+            OrderId     = $"undo_{DateTime.Now:yyyyMMddHHmmss}",
+            TxnTime     = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt      = txnAmt.ToString(),
+            OrigQueryId = orgQueryId        // 原始消费交易的 queryId
+        });
+        // resp.OrigRespCode: "00" = 撤销成功
+    }
+
+    // ── 预授权 ────────────────────────────────────────────────
+    // 预授权申请：冻结用户卡内资金，不实际扣款
+    public async Task<UnionPayPreAuthResponse> PreAuthAsync(
+        string orderId, string accNo, string customerInfo, int txnAmt)
+    {
+        return await unionPay.PreAuthAsync(new UnionPayPreAuthRequest
+        {
+            OrderId      = orderId,
+            TxnTime      = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt       = txnAmt.ToString(),
+            OrderDesc    = "酒店预授权",
+            AccNo        = accNo,           // 卡号（需加密上送）
+            CustomerInfo = customerInfo,     // 持卡人信息（需加密）
+            BackUrl      = "https://your-site.com/pay/unionpay/notify"
+        });
+    }
+
+    // 预授权撤销：撤销未完成的预授权交易
+    public async Task<UnionPayPreAuthUndoResponse> PreAuthUndoAsync(
+        string orderId, string origQueryId, int txnAmt)
+    {
+        return await unionPay.PreAuthUndoAsync(new UnionPayPreAuthUndoRequest
+        {
+            OrderId     = orderId,
+            TxnTime     = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt      = txnAmt.ToString(),
+            OrigQueryId = origQueryId       // 原始预授权 queryId
+        });
+    }
+
+    // 预授权完成：对已预授权的订单发起实际扣款
+    public async Task<UnionPayPreAuthCompleteResponse> PreAuthCompleteAsync(
+        string orderId, string origQueryId, int txnAmt)
+    {
+        return await unionPay.PreAuthCompleteAsync(new UnionPayPreAuthCompleteRequest
+        {
+            OrderId     = orderId,
+            TxnTime     = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt      = txnAmt.ToString(),    // 完成金额可小于等于原预授权金额
+            OrigQueryId = origQueryId
+        });
+    }
+
+    // 预授权完成撤销：撤销已完成的预授权扣款
+    public async Task<UnionPayPreAuthCompleteUndoResponse> PreAuthCompleteUndoAsync(
+        string orderId, string origQueryId, int txnAmt)
+    {
+        return await unionPay.PreAuthCompleteUndoAsync(new UnionPayPreAuthCompleteUndoRequest
+        {
+            OrderId     = orderId,
+            TxnTime     = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt      = txnAmt.ToString(),
+            OrigQueryId = origQueryId       // 原始预授权完成的 queryId
+        });
+    }
+
+    // ── 代收 ─────────────────────────────────────────────────
+    // 从用户银行卡扣款至商户（无跳转后台消费）
+    public async Task<UnionPayCollectionResponse> CollectionAsync(
+        string orderId, string accNo, string customerInfo, int txnAmt)
+    {
+        return await unionPay.CollectionAsync(new UnionPayCollectionRequest
+        {
+            OrderId      = orderId,
+            TxnTime      = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt       = txnAmt.ToString(),
+            AccNo        = accNo,           // 卡号（需加密上送）
+            CustomerInfo = customerInfo,     // 持卡人信息（需加密）
+            BackUrl      = "https://your-site.com/pay/unionpay/notify"
+        });
+    }
+
+    // ── 代付（付款到银行卡）───────────────────────────────────
+    // 从商户账户打款至用户银行卡
+    public async Task<UnionPayPaymentResponse> PayToBankCardAsync(
+        string orderId, string accNo, string customerInfo, int txnAmt)
+    {
+        return await unionPay.PayToBankCardAsync(new UnionPayPaymentRequest
+        {
+            OrderId      = orderId,
+            TxnTime      = DateTime.Now.ToString("yyyyMMddHHmmss"),
+            TxnAmt       = txnAmt.ToString(),
+            AccNo        = accNo,           // 收款卡号（需加密上送）
+            CustomerInfo = customerInfo,     // 收款人信息（需加密）
+            BackUrl      = "https://your-site.com/pay/unionpay/notify"
+        });
+    }
 }
 ```
 
@@ -1216,6 +1573,245 @@ wechat.RegisterCertificate("CERT_SERIAL_NO", certPemContent);
 ```
 
 > **新版公钥模式**下（配置了 `PUB_KEY_ID_` 前缀的 `PlatformPublicKeyId`），验签使用配置的微信支付公钥，无需下载平台证书。
+
+---
+
+### 合单支付
+
+合单支付用于将多笔子订单合并为一笔向用户收款，适用于购物车多商户、连锁门店等多场景。每笔合单最多支持 10 笔子订单，子订单金额累加为合单总金额，用户支付后资金会自动分配至各子商户。
+
+```csharp
+public class WechatCombineController(IWechatPayService wechat)
+{
+    // 合单 JSAPI 下单（公众号/小程序内）
+    public async Task<WechatJsPayParams> CombineJsapiPayAsync(string openId)
+    {
+        var resp = await wechat.CreateCombineJsapiOrderAsync(new WechatCombineOrderRequest
+        {
+            CombineAppId       = "wx_your_appid",
+            CombineMchId       = "1600000000",
+            CombineOutTradeNo  = "combine_order_001",
+            NotifyUrl          = "https://your-site.com/pay/wechat/notify",
+            SubOrders =
+            [
+                new WechatCombineSubOrder
+                {
+                    MchId       = "1600000000",
+                    OutTradeNo  = "sub_order_001",
+                    Description = "商品A",
+                    Amount      = new WechatCombineSubOrderAmount { TotalAmount = 100, Currency = "CNY" }
+                },
+                new WechatCombineSubOrder
+                {
+                    MchId       = "1600000001",
+                    OutTradeNo  = "sub_order_002",
+                    Description = "商品B",
+                    Amount      = new WechatCombineSubOrderAmount { TotalAmount = 200, Currency = "CNY" }
+                }
+            ],
+            CombinePayerInfo = new WechatCombinePayerInfo { OpenId = openId }
+        });
+        return wechat.BuildJsPayParams(resp.PrepayId);
+    }
+
+    // 合单 APP 下单
+    public async Task<WechatAppPayParams> CombineAppPayAsync()
+    {
+        var resp = await wechat.CreateCombineAppOrderAsync(new WechatCombineOrderRequest
+        {
+            CombineAppId       = "wx_your_appid",
+            CombineMchId       = "1600000000",
+            CombineOutTradeNo  = "combine_order_002",
+            NotifyUrl          = "https://your-site.com/pay/wechat/notify",
+            SubOrders =
+            [
+                new WechatCombineSubOrder
+                {
+                    MchId       = "1600000000",
+                    OutTradeNo  = "sub_order_003",
+                    Description = "商品A",
+                    Amount      = new WechatCombineSubOrderAmount { TotalAmount = 100 }
+                }
+            ]
+        });
+        return wechat.BuildAppPayParams(resp.PrepayId);
+    }
+
+    // 合单 H5 下单
+    public async Task<string> CombineH5PayAsync(string clientIp)
+    {
+        var resp = await wechat.CreateCombineH5OrderAsync(new WechatCombineOrderRequest
+        {
+            CombineAppId       = "wx_your_appid",
+            CombineMchId       = "1600000000",
+            CombineOutTradeNo  = "combine_order_003",
+            NotifyUrl          = "https://your-site.com/pay/wechat/notify",
+            SubOrders =
+            [
+                new WechatCombineSubOrder
+                {
+                    MchId       = "1600000000",
+                    OutTradeNo  = "sub_order_004",
+                    Description = "商品A",
+                    Amount      = new WechatCombineSubOrderAmount { TotalAmount = 100 }
+                }
+            ],
+            SceneInfo = new WechatPaySceneInfo { PayerClientIp = clientIp }
+        });
+        return resp.H5Url;
+    }
+
+    // 合单 Native 下单（扫码支付）
+    public async Task<string> CombineNativePayAsync()
+    {
+        var resp = await wechat.CreateCombineNativeOrderAsync(new WechatCombineOrderRequest
+        {
+            CombineAppId       = "wx_your_appid",
+            CombineMchId       = "1600000000",
+            CombineOutTradeNo  = "combine_order_004",
+            NotifyUrl          = "https://your-site.com/pay/wechat/notify",
+            SubOrders =
+            [
+                new WechatCombineSubOrder
+                {
+                    MchId       = "1600000000",
+                    OutTradeNo  = "sub_order_005",
+                    Description = "商品A",
+                    Amount      = new WechatCombineSubOrderAmount { TotalAmount = 300 }
+                }
+            ]
+        });
+        return resp.CodeUrl;
+    }
+
+    // 合单查询
+    public async Task<WechatCombineQueryResponse> QueryCombineAsync(string combineOutTradeNo)
+        => await wechat.QueryCombineOrderAsync(combineOutTradeNo);
+
+    // 合单关闭
+    public async Task CloseCombineAsync(string combineOutTradeNo)
+    {
+        await wechat.CloseCombineOrderAsync(combineOutTradeNo, new WechatCombineCloseRequest
+        {
+            CombineAppId = "wx_your_appid",
+            SubOrders =
+            [
+                new WechatCombineCloseSubOrder
+                {
+                    MchId      = "1600000000",
+                    OutTradeNo = "sub_order_001"
+                }
+            ]
+        });
+    }
+}
+```
+
+> **子订单说明**：每笔子订单的 `mchid` 必须是发起下单的合单商户号或其子商户号。每个子订单独立关联 `out_trade_no`、`description` 和 `amount`，最多 10 笔。
+
+---
+
+### 分账
+
+分账用于将已支付的订单金额按比例分配给多个接收方（如平台方、服务商、子商户等），支持冻结后解冻、分账回退等操作。
+
+```csharp
+public class WechatProfitSharingController(IWechatPayService wechat)
+{
+    // 请求分账
+    public async Task<WechatProfitSharingResponse> CreateProfitSharingAsync(
+        string transactionId, string outOrderNo)
+    {
+        return await wechat.CreateProfitSharingAsync(new WechatProfitSharingRequest
+        {
+            AppId         = "wx_your_appid",
+            TransactionId = transactionId,       // 微信支付订单号
+            OutOrderNo    = outOrderNo,           // 商户分账单号
+            Receivers =
+            [
+                new WechatProfitSharingReceiver
+                {
+                    Type        = "MERCHANT_ID",
+                    Account     = "1600000002",    // 分账接收方商户号
+                    Amount      = 10,               // 分账金额（分）
+                    Description = "平台服务费"
+                },
+                new WechatProfitSharingReceiver
+                {
+                    Type        = "MERCHANT_ID",
+                    Account     = "1600000003",
+                    Amount      = 30,
+                    Description = "分店分账"
+                }
+            ],
+            UnfreezeUnsplit = false   // true = 解冻剩余未分账资金
+        });
+    }
+
+    // 查询分账结果
+    public async Task<WechatProfitSharingQueryResponse> QueryProfitSharingAsync(
+        string outOrderNo, string transactionId)
+        => await wechat.QueryProfitSharingAsync(outOrderNo, transactionId);
+
+    // 请求分账回退
+    public async Task<WechatProfitSharingReturnResponse> ReturnProfitSharingAsync(
+        string outOrderNo, string outReturnNo)
+    {
+        return await wechat.ReturnProfitSharingAsync(new WechatProfitSharingReturnRequest
+        {
+            OutOrderNo     = outOrderNo,
+            OutReturnNo    = outReturnNo,
+            ReturnMchId    = "1600000002",     // 回退方商户号
+            Amount         = 5,                 // 回退金额（分）
+            Description    = "分账回退",
+            OrderId        = outOrderNo         // 原分账单号
+        });
+    }
+
+    // 查询分账回退结果
+    public async Task<WechatProfitSharingReturnQueryResponse> QueryReturnAsync(
+        string outReturnNo, string outOrderNo)
+        => await wechat.QueryProfitSharingReturnAsync(outReturnNo, outOrderNo);
+}
+```
+
+> **资金解冻周期**：用户支付成功后资金默认冻结 30 天（可通过 `settle_info.profit_sharing` 参数延长），在冻结期内需完成分账。若设置 `UnfreezeUnsplit = true`，SDK 会在分账同时解冻剩余资金。
+
+---
+
+### 商家转账到零钱
+
+商家转账到零钱用于向指定用户（通过 OpenId 识别）的微信零钱账户发起转账，适用于企业付款、红包发放、佣金结算等场景。
+
+> **💡 UserName 加密说明**：如果提供收款用户姓名（`UserName`），需要先使用 `EncryptSensitiveField` 加密后再传入。SDK 在内部已预留加密字段，实际传输时需自行调用加密方法获得密文。
+
+```csharp
+public class WechatTransferController(IWechatPayService wechat)
+{
+    // 发起商家转账到零钱
+    public async Task<WechatTransferBillsResponse> TransferToWalletAsync(
+        string openId, int amount)
+    {
+        return await wechat.TransferBillsAsync(new WechatTransferBillsRequest
+        {
+            AppId           = "wx_your_appid",
+            OutBillNo       = $"transfer_{DateTime.Now:yyyyMMddHHmmssfff}",
+            TransferSceneId = "1000",                   // 转账场景 ID
+            OpenId          = openId,                    // 收款用户 openid
+            UserName        = wechat.EncryptSensitiveField("张三"),  // 收款用户姓名（需加密）
+            TransferAmount  = amount,                    // 转账金额（分）
+            TransferRemark  = "活动补贴",
+            NotifyUrl       = "https://your-site.com/pay/wechat/transfer-notify"
+        });
+    }
+
+    // 查询转账结果
+    public async Task<WechatTransferBillQueryResponse> QueryTransferAsync(string outBillNo)
+        => await wechat.QueryTransferBillAsync(outBillNo);
+}
+```
+
+> **转账场景 ID**：不同业务场景对应不同的 `TransferSceneId`（如 `1000` = 营销活动），需向微信支付申请开通。若不传 `UserName`，SDK 将仅凭 openid 进行校验转账。
 
 ---
 
@@ -1467,6 +2063,97 @@ public class WechatController(IWechatPayService wechat)
 
 > **💡 说明**：`Idempotency-Key` 在 `WechatPayHttpClient` 的 `PostAsync`、`PostNoContentAsync`、`PostWithEncryptionAsync` 方法中均可通过参数传入。瞬态重试机制独立于幂等键工作 — 瞬态重试针对的是网络层故障（在请求未到达微信服务器时安全重试），而幂等键则保护已到达服务器的请求不被重复处理。
 
+### 沙箱环境（Sandbox Mode）
+
+SDK 支持通过 `Environment` 属性切换生产环境与沙箱环境，方便开发测试。所有三个渠道的 Options 类均提供 `Environment` 配置项：
+
+```csharp
+// 微信支付：使用测试商户号（微信支付无公开沙箱，但 SDK 预留了切换能力）
+builder.Services.AddWechatPay(opt =>
+{
+    opt.AppId       = "wx_your_appid";
+    opt.MchId       = "1600000000";
+    opt.ApiV3Key    = "your_api_v3_key";
+    opt.PrivateKey  = "your_private_key";
+    opt.CertSerialNo = "your_serial_no";
+    opt.Environment = PayEnvironment.Sandbox;  // 设置为沙箱模式
+});
+
+// 支付宝：自动切换到沙箱网关 https://openapi-sandbox.dl.alipaydev.com/gateway.do
+builder.Services.AddAlipay(opt =>
+{
+    opt.AppId           = "2021000000000000";
+    opt.PrivateKey      = "your_private_key";
+    opt.AlipayPublicKey = "alipay_public_key";
+    opt.Environment     = PayEnvironment.Sandbox;
+});
+
+// 银联：Production / Sandbox 通过 Environment 切换
+builder.Services.AddUnionPay(opt =>
+{
+    opt.MerId             = "your_test_mer_id";
+    opt.Environment       = PayEnvironment.Sandbox;
+    // 其余配置保持不变
+});
+```
+
+> **沙箱说明**：支付宝沙箱网关为 `openapi-sandbox.dl.alipaydev.com`，SDK 在 `PayEnvironment.Sandbox` 下自动切换。微信支付和银联的沙箱环境需向对应平台申请测试商户号，SDK 通过 `Environment` 标记业务意图，具体网关地址由平台方提供。
+
+### 分布式追踪（OpenTelemetry）
+
+SDK 内置了 OpenTelemetry 兼容的 `ActivitySource`，所有支付渠道的 API 调用均会创建 `Activity` Span，便于在 APM 系统（如 Jaeger、Zipkin、Azure Monitor 等）中追踪支付链路：
+
+```csharp
+using GaoXinLibrary.PaySDK.Core;
+using OpenTelemetry.Trace;
+
+// Program.cs 中注册 OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddSource(PayActivitySource.Source.Name)  // "GaoXinLibrary.PaySDK"
+        .AddJaegerExporter());                     // 或其他 Exporter
+
+// 业务代码中无需额外处理，SDK 自动为每次 API 调用创建 Span
+// 包含 channel、method、out_trade_no 等标签
+```
+
+> **ActivitySource 名称**：`GaoXinLibrary.PaySDK`（可在类 `PayActivitySource.Source.Name` 中获取）。每个支付 API 调用都会自动创建对应的 Span，标签包括 `channel`、`method`、`out_trade_no` 等核心字段。
+
+### 健康检查（Health Check）
+
+SDK 提供了标准的 ASP.NET Core 健康检查端点，用于监控各支付渠道的配置状态：
+
+```csharp
+// Program.cs
+builder.Services
+    .AddHealthChecks()
+    .AddPayHealthChecks();   // 添加 PaySDK 健康检查（tag: "payment"）
+
+// app.MapHealthChecks 或自定义端点...
+app.MapHealthChecks("/health");
+
+// 返回示例：
+// {
+//   "status": "Healthy",
+//   "results": {
+//     "pay_sdk": {
+//       "status": "Healthy",
+//       "description": "PaySDK is operational",
+//       "data": {
+//         "channels.wechat": "configured",
+//         "channels.alipay": "configured",
+//         "channels.unionpay": "configured",
+//         "sdk.version": "1.0.0"
+//       }
+//     }
+//   }
+// }
+```
+
+> **依赖前提**：`AddPayHealthChecks` 需在 `IPayService` 已注册的前提下使用（先调用 `AddPaySDK` 或 `AddPayService`）。未注册 `IPayService` 时健康检查仍返回 Healthy，但各渠道状态为 `not_configured`。
+
 ### 统一日志追踪（推荐）
 
 `PayService` 已补充统一日志字段，建议在业务层补齐 `requestId` 并在落单/回调时记录以下字段：`channel`、`outTradeNo`、`requestId`、`tradeStatus`、`errorCode`。
@@ -1633,12 +2320,22 @@ catch (PayException ex)
 |------|------|------|------|
 | 微信支付 | JSAPI/APP/H5/Native/小程序、退款、退款查询、回调验签解密 | ✅ | 已支持 |
 | 微信支付 | 异常退款、平台证书下载注册、敏感字段加解密 | ✅ | 已支持 |
+| 微信支付 | 合单支付（JSAPI/APP/H5/Native 下单、查询、关闭） | ✅ | 本版本新增 |
+| 微信支付 | 分账（请求分账、分账查询、分账回退、回退查询） | ✅ | 本版本新增 |
+| 微信支付 | 商家转账到零钱、转账查询 | ✅ | 本版本新增 |
+| 微信支付 | 花呗分期、支付券 | 🚧 | 规划中，按业务优先级扩展 |
+| 微信支付 | 微信支付分 | 🚧 | 规划中 |
 | 支付宝 | 收单核心链路（当面付/预下单/JSAPI/App/WAP/Page） | ✅ | 已支持 |
-| 支付宝 | 分账关系绑定、订单分账、商家转账 | ✅ | 本版本新增 |
-| 支付宝 | 投诉/风控 API（交易投诉、RiskGO） | 🚧 | 规划中，按业务优先级扩展 |
+| 支付宝 | 分账关系绑定、订单分账、商家转账 | ✅ | 已支持 |
+| 支付宝 | 分账查询、分账关系批量查询、转账查询 | ✅ | 本版本新增 |
+| 支付宝 | 交易投诉查询与反馈 | ✅ | 本版本新增 |
+| 支付宝 | 花呗分期、RiskGO | 🚧 | 规划中 |
 | 银联 | 收单交易、退款、查询、回调、海关申报 | ✅ | 已支持 |
-| 银联 | OpenAPI 独立模块（OAuth2/非对称认证骨架） | ✅ | 本版本新增 |
+| 银联 | 消费撤销、预授权申请/撤销/完成/完成撤销 | ✅ | 本版本新增 |
+| 银联 | 代收、代付（付款到银行卡） | ✅ | 本版本新增 |
+| 银联 | OpenAPI 独立模块（OAuth2/非对称认证骨架） | ✅ | 已支持 |
 | 银联 | OpenAPI 具体产品 API（按产品逐项封装） | 🚧 | 规划中，建议按业务申请逐步接入 |
+| 全渠道 | 健康检查（IHealthCheck）、分布式追踪（OpenTelemetry）、沙箱环境 | ✅ | 本版本新增 |
 
 ---
 
@@ -1653,6 +2350,9 @@ GaoXinLibrary.PaySDK/
 │   ├── PayException.cs             # 基础异常
 │   ├── PayRetryOptions.cs          # 瞬态故障重试配置（指数退避）
 │   ├── PayJsonSerializer.cs        # 统一 JSON 序列化工具
+│   ├── PayActivitySource.cs        # OpenTelemetry ActivitySource
+│   ├── PayHealthCheck.cs           # ASP.NET Core 健康检查实现
+│   ├── PayConstants.cs             # 全局常量（沙箱网关地址等）
 │   ├── CreateOrderRequest.cs       # 创建订单请求
 │   ├── CreateOrderResponse.cs      # 创建订单响应
 │   ├── QueryOrderRequest.cs        # 查询订单请求
@@ -1671,29 +2371,64 @@ GaoXinLibrary.PaySDK/
 │   ├── Models/                      # 所有微信支付请求/响应模型
 │   │   ├── WechatAbnormalRefundRequest.cs    # 异常退款请求
 │   │   ├── WechatAbnormalRefundResponse.cs   # 异常退款响应
+│   │   ├── WechatCombineOrderRequest.cs      # 合单下单请求（含子订单结构）
+│   │   ├── WechatCombineOrderResponse.cs     # 合单下单响应
+│   │   ├── WechatCombineQueryResponse.cs     # 合单查询响应
+│   │   ├── WechatCombineCloseRequest.cs      # 合单关闭请求
+│   │   ├── WechatProfitSharingRequest.cs     # 请求分账
+│   │   ├── WechatProfitSharingQueryResponse.cs    # 分账查询响应
+│   │   ├── WechatProfitSharingReturnRequest.cs    # 分账回退请求
+│   │   ├── WechatProfitSharingReturnQueryResponse.cs # 分账回退查询响应
+│   │   ├── WechatTransferBillsRequest.cs     # 商家转账到零钱请求
+│   │   ├── WechatTransferBillsResponse.cs    # 商家转账到零钱响应
+│   │   ├── WechatTransferBillQueryResponse.cs # 转账查询响应
 │   │   └── ...                               # 其他支付/回调模型
 │   ├── Services/                    # IWechatPayService / WechatPayService
 │   └── WechatPayClient.cs          # 非 DI 场景的客户端入口
 ├── Alipay/                          # 支付宝
 │   ├── Core/                        # AlipayOptions / AlipaySigner / AlipayHttpClient
 │   ├── Models/                      # 所有支付宝请求/响应模型
-│   │   ├── AlipayTradeRoyaltyRelationBindContent.cs  # 分账关系绑定
-│   │   ├── AlipayTradeOrderSettleContent.cs          # 订单分账
-│   │   ├── AlipayFundTransUniTransferContent.cs      # 商家转账
+│   │   ├── AlipayTradeRoyaltyRelationBindContent.cs      # 分账关系绑定
+│   │   ├── AlipayTradeOrderSettleContent.cs              # 订单分账
+│   │   ├── AlipayTradeOrderSettleQueryContent.cs         # 分账查询请求
+│   │   ├── AlipayTradeOrderSettleQueryResponse.cs        # 分账查询响应
+│   │   ├── AlipayTradeRoyaltyRelationBatchQueryContent.cs # 分账关系批量查询请求
+│   │   ├── AlipayTradeRoyaltyRelationBatchQueryResponse.cs # 分账关系批量查询响应
+│   │   ├── AlipayFundTransUniTransferContent.cs          # 商家转账
+│   │   ├── AlipayFundTransCommonQueryContent.cs          # 转账查询请求
+│   │   ├── AlipayFundTransCommonQueryResponse.cs         # 转账查询响应
+│   │   ├── AlipayTradeComplainQueryContent.cs            # 交易投诉查询请求
+│   │   ├── AlipayTradeComplainQueryResponse.cs           # 交易投诉查询响应
+│   │   ├── AlipayTradeComplainFeedbackContent.cs         # 交易投诉反馈请求
+│   │   └── ...                                           # 其他支付/回调模型
 │   ├── Services/                    # IAlipayService / AlipayService
 │   └── AlipayClient.cs             # 非 DI 场景的客户端入口
 ├── UnionPay/                        # 银联
 │   ├── Core/                        # UnionPayOptions / UnionPaySigner / UnionPayHttpClient
 │   ├── Models/                      # 所有银联请求/响应模型
-│   │   ├── UnionPayCustomsDeclarationRequest.cs   # 海关申报请求
-│   │   ├── UnionPayCustomsQueryRequest.cs         # 海关申报查询请求
-│   │   ├── UnionPayEncryptKeyQueryRequest.cs      # 加密公钥更新查询请求
-│   │   ├── UnionPayEncryptKeyQueryResponse.cs     # 加密公钥更新查询响应
-│   │   ├── UnionPayRealNameAuthRequest.cs         # 实名认证请求
-│   │   ├── UnionPayRealNameAuthResponse.cs        # 实名认证响应
-│   │   ├── UnionPayFileTransferRequest.cs         # 文件传输请求
-│   │   ├── UnionPayFileTransferResponse.cs        # 文件传输响应
-│   │   └── ...                                    # 其他支付/回调模型
+│   │   ├── UnionPayConsumeUndoRequest.cs            # 消费撤销请求
+│   │   ├── UnionPayConsumeUndoResponse.cs           # 消费撤销响应
+│   │   ├── UnionPayPreAuthRequest.cs                # 预授权请求
+│   │   ├── UnionPayPreAuthResponse.cs               # 预授权响应
+│   │   ├── UnionPayPreAuthUndoRequest.cs            # 预授权撤销请求
+│   │   ├── UnionPayPreAuthUndoResponse.cs           # 预授权撤销响应
+│   │   ├── UnionPayPreAuthCompleteRequest.cs        # 预授权完成请求
+│   │   ├── UnionPayPreAuthCompleteResponse.cs       # 预授权完成响应
+│   │   ├── UnionPayPreAuthCompleteUndoRequest.cs    # 预授权完成撤销请求
+│   │   ├── UnionPayPreAuthCompleteUndoResponse.cs   # 预授权完成撤销响应
+│   │   ├── UnionPayCollectionRequest.cs             # 代收请求
+│   │   ├── UnionPayCollectionResponse.cs            # 代收响应
+│   │   ├── UnionPayPaymentRequest.cs                # 代付请求
+│   │   ├── UnionPayPaymentResponse.cs               # 代付响应
+│   │   ├── UnionPayCustomsDeclarationRequest.cs     # 海关申报请求
+│   │   ├── UnionPayCustomsQueryRequest.cs           # 海关申报查询请求
+│   │   ├── UnionPayEncryptKeyQueryRequest.cs        # 加密公钥更新查询请求
+│   │   ├── UnionPayEncryptKeyQueryResponse.cs       # 加密公钥更新查询响应
+│   │   ├── UnionPayRealNameAuthRequest.cs           # 实名认证请求
+│   │   ├── UnionPayRealNameAuthResponse.cs          # 实名认证响应
+│   │   ├── UnionPayFileTransferRequest.cs           # 文件传输请求
+│   │   ├── UnionPayFileTransferResponse.cs          # 文件传输响应
+│   │   └── ...                                      # 其他支付/回调模型
 │   ├── Services/                    # IUnionPayService / UnionPayService
 │   │   ├── IUnionPayCustomsService.cs  # 海关申报接口（非支付）
 │   │   └── UnionPayCustomsService.cs   # 海关申报实现
@@ -1707,9 +2442,41 @@ GaoXinLibrary.PaySDK/
 │   ├── WechatPayServiceCollectionExtensions.cs # AddWechatPay
 │   ├── AlipayServiceCollectionExtensions.cs    # AddAlipay
 │   ├── UnionPayServiceCollectionExtensions.cs  # AddUnionPay
+│   ├── PayHealthCheckExtensions.cs            # AddPayHealthChecks
 │   └── UnionPayOpenApiServiceCollectionExtensions.cs  # AddUnionPayOpenApi
-└── PayService.cs                    # IPayService 统一路由实现
+├── PayService.cs                    # IPayService 统一路由实现
+├── PayService.Wechat.cs             # 微信支付统一路由实现
+├── PayService.Alipay.cs             # 支付宝统一路由实现
+└── PayService.UnionPay.cs           # 银联统一路由实现
 ```
+
+---
+
+## 单元测试
+
+项目包含完整的单元测试套件，位于 `GaoXinLibrary.PaySDK.Tests/` 测试项目中，共计 **159 个测试用例**，全部通过。
+
+### 运行测试
+
+```bash
+# 运行全部测试
+dotnet test GaoXinLibrary.PaySDK.Tests/
+
+# 运行指定测试分类
+dotnet test GaoXinLibrary.PaySDK.Tests/ --filter "Category=SignerTests"
+```
+
+### 测试分类
+
+| 测试文件 | 覆盖范围 |
+|---------|---------|
+| `SignerTests.cs` | 微信支付 v3 签名、支付宝 RSA2 签名、银联签名算法 |
+| `AmountConversionTests.cs` | 金额单位转换（元 → 分 / 分 → 元）边界值 |
+| `PayChannelExtensionsTests.cs` | PayChannel 枚举扩展方法（渠道名称、描述等） |
+| `PayRetryOptionsTests.cs` | 重试配置默认值、自定义参数、禁用场景 |
+| `PayJsonSerializerTests.cs` | snake_case 序列化/反序列化、Unicode 转义控制 |
+| `PayServiceTests.cs` | 统一接口路由（IPayService）集成测试 |
+| `EdgeCaseTests.cs` | 边界场景（空值处理、特殊字符、超长字符串等） |
 
 ---
 
