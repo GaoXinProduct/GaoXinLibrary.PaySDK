@@ -150,4 +150,94 @@ public interface IWechatPayService
     /// <param name="cipherText">Base64 编码的加密密文</param>
     /// <returns>解密后的明文字符串</returns>
     string DecryptSensitiveField(string cipherText);
+
+    // ── 合单支付（Combine Payment） ───────────────────────────
+
+    /// <summary>
+    /// 合单 JSAPI 下单
+    /// <para>POST /v3/combine-transactions/jsapi</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791856</para>
+    /// </summary>
+    Task<WechatCombineOrderResponse> CreateCombineJsapiOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 合单 APP 下单
+    /// <para>POST /v3/combine-transactions/app</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791856</para>
+    /// </summary>
+    Task<WechatCombineOrderResponse> CreateCombineAppOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 合单 H5 下单
+    /// <para>POST /v3/combine-transactions/h5</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791856</para>
+    /// </summary>
+    Task<WechatCombineOrderResponse> CreateCombineH5OrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 合单 Native 下单
+    /// <para>POST /v3/combine-transactions/native</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791856</para>
+    /// </summary>
+    Task<WechatCombineOrderResponse> CreateCombineNativeOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 合单查询订单
+    /// <para>GET /v3/combine-transactions/out-trade-no/{combine_out_trade_no}</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791857</para>
+    /// </summary>
+    Task<WechatCombineQueryResponse> QueryCombineOrderAsync(string combineOutTradeNo, CancellationToken ct = default);
+
+    /// <summary>
+    /// 合单关闭订单
+    /// <para>POST /v3/combine-transactions/out-trade-no/{combine_out_trade_no}/close</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791863</para>
+    /// </summary>
+    Task CloseCombineOrderAsync(string combineOutTradeNo, WechatCombineCloseRequest request, CancellationToken ct = default);
+
+    // ── 分账（Profit Sharing） ────────────────────────────────
+
+    /// <summary>
+    /// 请求分账
+    /// <para>POST /v3/profitsharing/orders</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791906</para>
+    /// </summary>
+    Task<WechatProfitSharingResponse> CreateProfitSharingAsync(WechatProfitSharingRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 查询分账结果
+    /// <para>GET /v3/profitsharing/orders/{out_order_no}?transaction_id={transaction_id}</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791908</para>
+    /// </summary>
+    Task<WechatProfitSharingQueryResponse> QueryProfitSharingAsync(string outOrderNo, string transactionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 请求分账回退
+    /// <para>POST /v3/profitsharing/return-orders</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791911</para>
+    /// </summary>
+    Task<WechatProfitSharingReturnResponse> ReturnProfitSharingAsync(WechatProfitSharingReturnRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 查询分账回退结果
+    /// <para>GET /v3/profitsharing/return-orders/{out_return_no}?out_order_no={out_order_no}</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012791912</para>
+    /// </summary>
+    Task<WechatProfitSharingReturnQueryResponse> QueryProfitSharingReturnAsync(string outReturnNo, string outOrderNo, CancellationToken ct = default);
+
+    // ── 商家转账到零钱（Transfer） ─────────────────────────────
+
+    /// <summary>
+    /// 商家转账到零钱
+    /// <para>POST /v3/transfer/bills</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012716434</para>
+    /// </summary>
+    Task<WechatTransferBillsResponse> TransferBillsAsync(WechatTransferBillsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// 查询商家转账到零钱
+    /// <para>GET /v3/transfer/bills/out-bill-no/{out_bill_no}</para>
+    /// <para>https://pay.weixin.qq.com/doc/v3/merchant/4012716436</para>
+    /// </summary>
+    Task<WechatTransferBillQueryResponse> QueryTransferBillAsync(string outBillNo, CancellationToken ct = default);
 }

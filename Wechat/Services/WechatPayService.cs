@@ -359,4 +359,149 @@ public sealed class WechatPayService : IWechatPayService
             return value;
         }
     }
+
+    // ── 合单支付（Combine Payment） ───────────────────────────
+
+    /// <inheritdoc/>
+    public async Task<WechatCombineOrderResponse> CreateCombineJsapiOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default)
+    {
+        FillCombineCommonFields(request);
+        return await _http.PostAsync<WechatCombineOrderResponse>(
+            "/v3/combine-transactions/jsapi",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.CombineOutTradeNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatCombineOrderResponse> CreateCombineAppOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default)
+    {
+        FillCombineCommonFields(request);
+        return await _http.PostAsync<WechatCombineOrderResponse>(
+            "/v3/combine-transactions/app",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.CombineOutTradeNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatCombineOrderResponse> CreateCombineH5OrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default)
+    {
+        FillCombineCommonFields(request);
+        return await _http.PostAsync<WechatCombineOrderResponse>(
+            "/v3/combine-transactions/h5",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.CombineOutTradeNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatCombineOrderResponse> CreateCombineNativeOrderAsync(WechatCombineOrderRequest request, CancellationToken ct = default)
+    {
+        FillCombineCommonFields(request);
+        return await _http.PostAsync<WechatCombineOrderResponse>(
+            "/v3/combine-transactions/native",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.CombineOutTradeNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatCombineQueryResponse> QueryCombineOrderAsync(string combineOutTradeNo, CancellationToken ct = default)
+    {
+        return await _http.GetAsync<WechatCombineQueryResponse>(
+            $"/v3/combine-transactions/out-trade-no/{Uri.EscapeDataString(combineOutTradeNo)}",
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task CloseCombineOrderAsync(string combineOutTradeNo, WechatCombineCloseRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(request.CombineAppId))
+            request.CombineAppId = _options.AppId;
+        await _http.PostNoContentAsync(
+            $"/v3/combine-transactions/out-trade-no/{Uri.EscapeDataString(combineOutTradeNo)}/close",
+            request,
+            idempotencyKey: BuildIdempotencyKey(combineOutTradeNo),
+            ct: ct);
+    }
+
+    private void FillCombineCommonFields(WechatCombineOrderRequest request)
+    {
+        if (string.IsNullOrEmpty(request.CombineAppId))
+            request.CombineAppId = _options.AppId;
+        if (string.IsNullOrEmpty(request.CombineMchId))
+            request.CombineMchId = _options.MchId;
+        if (string.IsNullOrEmpty(request.NotifyUrl))
+            request.NotifyUrl = _options.NotifyUrl;
+    }
+
+    // ── 分账（Profit Sharing） ────────────────────────────────
+
+    /// <inheritdoc/>
+    public async Task<WechatProfitSharingResponse> CreateProfitSharingAsync(WechatProfitSharingRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(request.AppId))
+            request.AppId = _options.AppId;
+        return await _http.PostAsync<WechatProfitSharingResponse>(
+            "/v3/profitsharing/orders",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutOrderNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatProfitSharingQueryResponse> QueryProfitSharingAsync(string outOrderNo, string transactionId, CancellationToken ct = default)
+    {
+        return await _http.GetAsync<WechatProfitSharingQueryResponse>(
+            $"/v3/profitsharing/orders/{Uri.EscapeDataString(outOrderNo)}?transaction_id={Uri.EscapeDataString(transactionId)}",
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatProfitSharingReturnResponse> ReturnProfitSharingAsync(WechatProfitSharingReturnRequest request, CancellationToken ct = default)
+    {
+        return await _http.PostAsync<WechatProfitSharingReturnResponse>(
+            "/v3/profitsharing/return-orders",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutReturnNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatProfitSharingReturnQueryResponse> QueryProfitSharingReturnAsync(string outReturnNo, string outOrderNo, CancellationToken ct = default)
+    {
+        return await _http.GetAsync<WechatProfitSharingReturnQueryResponse>(
+            $"/v3/profitsharing/return-orders/{Uri.EscapeDataString(outReturnNo)}?out_order_no={Uri.EscapeDataString(outOrderNo)}",
+            ct);
+    }
+
+    // ── 商家转账到零钱（Transfer） ─────────────────────────────
+
+    /// <inheritdoc/>
+    public async Task<WechatTransferBillsResponse> TransferBillsAsync(WechatTransferBillsRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(request.AppId))
+            request.AppId = _options.AppId;
+        if (string.IsNullOrEmpty(request.NotifyUrl) && !string.IsNullOrEmpty(_options.NotifyUrl))
+            request.NotifyUrl = _options.NotifyUrl;
+
+        // 自动加密敏感字段（收款方真实姓名），与 ApplyAbnormalRefundAsync 保持一致
+        if (!string.IsNullOrEmpty(request.UserName))
+            request.UserName = _signer.EncryptSensitiveField(request.UserName);
+
+        return await _http.PostWithEncryptionAsync<WechatTransferBillsResponse>(
+            "/v3/transfer/bills",
+            request,
+            idempotencyKey: BuildIdempotencyKey(request.OutBillNo),
+            ct: ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<WechatTransferBillQueryResponse> QueryTransferBillAsync(string outBillNo, CancellationToken ct = default)
+    {
+        return await _http.GetAsync<WechatTransferBillQueryResponse>(
+            $"/v3/transfer/bills/out-bill-no/{Uri.EscapeDataString(outBillNo)}",
+            ct);
+    }
 }
