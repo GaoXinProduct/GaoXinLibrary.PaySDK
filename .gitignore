@@ -2,6 +2,24 @@
 # 此 .gitignore 文件已由 Microsoft(R) Visual Studio 自动创建。
 ################################################################################
 
-/obj
-/bin
+# Build results
+**/[Bb]in/
+**/[Oo]bj/
+
+# IDE
 /.vs
+
+# NuGet packages folder (never check in packages)
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nupkg
+*.snupkg
+
+# macOS
+.DS_Store
+
+# Rider
+.idea/
+
+# Test results
+TestResults/

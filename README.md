@@ -2342,7 +2342,7 @@ catch (PayException ex)
 ## 项目结构
 
 ```
-GaoXinLibrary.PaySDK/
+src/GaoXinLibrary.PaySDK/
 ├── Core/                           # 统一基础类型
 │   ├── IPayService.cs              # 统一支付接口
 │   ├── PayChannel.cs               # 渠道枚举（17 种子渠道，含 Apple Pay）
