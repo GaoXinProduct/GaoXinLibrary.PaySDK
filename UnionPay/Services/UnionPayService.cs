@@ -3,24 +3,17 @@ using GaoXinLibrary.PaySDK.UnionPay.Models;
 
 namespace GaoXinLibrary.PaySDK.UnionPay.Services;
 
-/// <summary>
-/// 银联支付服务实现
-/// </summary>
 public sealed class UnionPayService : IUnionPayService
 {
     private readonly UnionPayHttpClient _http;
     private readonly UnionPayOptions _options;
 
-    /// <summary>
-    /// 初始化银联支付服务
-    /// </summary>
     public UnionPayService(UnionPayHttpClient http, UnionPayOptions options)
     {
         _http = http;
         _options = options;
     }
 
-    /// <inheritdoc/>
     public UnionPayFrontPayResponse CreateFrontPay(UnionPayFrontPayRequest request)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -45,7 +38,6 @@ public sealed class UnionPayService : IUnionPayService
         return new UnionPayFrontPayResponse { FormHtml = html };
     }
 
-    /// <inheritdoc/>
     public UnionPayFrontPayResponse CreateWapPay(UnionPayWapPayRequest request)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -71,7 +63,6 @@ public sealed class UnionPayService : IUnionPayService
         return new UnionPayFrontPayResponse { FormHtml = html };
     }
 
-    /// <inheritdoc/>
     public async Task<UnionPayBackPayResponse> CreateBackPayAsync(UnionPayBackPayRequest request, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -116,7 +107,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public async Task<UnionPayQrCodeApplyResponse> ApplyQrCodeAsync(UnionPayQrCodeApplyRequest request, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -150,7 +140,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public async Task<UnionPayBackPayResponse> QrCodeConsumeAsync(UnionPayQrCodeConsumeRequest request, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -185,7 +174,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public async Task<UnionPayQueryResponse> QueryOrderAsync(UnionPayQueryRequest request, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -215,7 +203,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public async Task<UnionPayRefundResponse> RefundAsync(UnionPayRefundRequest request, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -246,7 +233,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public UnionPayCallbackParams ParseCallback(IDictionary<string, string> formParams)
     {
         var raw = new Dictionary<string, string>(formParams, StringComparer.Ordinal);
@@ -266,7 +252,6 @@ public sealed class UnionPayService : IUnionPayService
         };
     }
 
-    /// <inheritdoc/>
     public async Task<byte[]> DownloadBillAsync(string settleDate, string fileType, CancellationToken ct = default)
     {
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -279,6 +264,252 @@ public sealed class UnionPayService : IUnionPayService
         };
 
         return await _http.DownloadFileAsync(parameters, _options.FileGatewayUrl, ct);
+    }
+
+    public async Task<UnionPayConsumeUndoResponse> ConsumeUndoAsync(UnionPayConsumeUndoRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["origQueryId"] = request.OrigQueryId,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayConsumeUndoResponse
+        {
+            RespCode     = GetValue(raw, "respCode"),
+            RespMsg      = GetValue(raw, "respMsg"),
+            OrderId      = GetValue(raw, "orderId"),
+            QueryId      = GetValue(raw, "queryId"),
+            TxnAmt       = GetValue(raw, "txnAmt"),
+            TxnTime      = GetValue(raw, "txnTime"),
+            OrigRespCode = GetValue(raw, "origRespCode"),
+            OrigRespMsg  = GetValue(raw, "origRespMsg"),
+            RawParams    = raw
+        };
+    }
+
+    public async Task<UnionPayPreAuthResponse> PreAuthAsync(UnionPayPreAuthRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["channelType"] = request.ChannelType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["orderDesc"]   = request.OrderDesc,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.AccNo))
+            parameters["accNo"] = request.AccNo;
+        if (!string.IsNullOrEmpty(request.CustomerInfo))
+            parameters["customerInfo"] = request.CustomerInfo;
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayPreAuthResponse
+        {
+            RespCode   = GetValue(raw, "respCode"),
+            RespMsg    = GetValue(raw, "respMsg"),
+            OrderId    = GetValue(raw, "orderId"),
+            QueryId    = GetValue(raw, "queryId"),
+            TxnAmt     = GetValue(raw, "txnAmt"),
+            TxnTime    = GetValue(raw, "txnTime"),
+            SettleAmt  = GetValue(raw, "settleAmt"),
+            SettleDate = GetValue(raw, "settleDate"),
+            RawParams  = raw
+        };
+    }
+
+    public async Task<UnionPayPreAuthUndoResponse> PreAuthUndoAsync(UnionPayPreAuthUndoRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["origQueryId"] = request.OrigQueryId,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayPreAuthUndoResponse
+        {
+            RespCode     = GetValue(raw, "respCode"),
+            RespMsg      = GetValue(raw, "respMsg"),
+            OrderId      = GetValue(raw, "orderId"),
+            QueryId      = GetValue(raw, "queryId"),
+            TxnAmt       = GetValue(raw, "txnAmt"),
+            OrigRespCode = GetValue(raw, "origRespCode"),
+            OrigRespMsg  = GetValue(raw, "origRespMsg"),
+            RawParams    = raw
+        };
+    }
+
+    public async Task<UnionPayPreAuthCompleteResponse> PreAuthCompleteAsync(UnionPayPreAuthCompleteRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["origQueryId"] = request.OrigQueryId,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayPreAuthCompleteResponse
+        {
+            RespCode     = GetValue(raw, "respCode"),
+            RespMsg      = GetValue(raw, "respMsg"),
+            OrderId      = GetValue(raw, "orderId"),
+            QueryId      = GetValue(raw, "queryId"),
+            TxnAmt       = GetValue(raw, "txnAmt"),
+            OrigRespCode = GetValue(raw, "origRespCode"),
+            OrigRespMsg  = GetValue(raw, "origRespMsg"),
+            RawParams    = raw
+        };
+    }
+
+    public async Task<UnionPayPreAuthCompleteUndoResponse> PreAuthCompleteUndoAsync(UnionPayPreAuthCompleteUndoRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["origQueryId"] = request.OrigQueryId,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayPreAuthCompleteUndoResponse
+        {
+            RespCode     = GetValue(raw, "respCode"),
+            RespMsg      = GetValue(raw, "respMsg"),
+            OrderId      = GetValue(raw, "orderId"),
+            QueryId      = GetValue(raw, "queryId"),
+            TxnAmt       = GetValue(raw, "txnAmt"),
+            OrigRespCode = GetValue(raw, "origRespCode"),
+            OrigRespMsg  = GetValue(raw, "origRespMsg"),
+            RawParams    = raw
+        };
+    }
+
+    public async Task<UnionPayCollectionResponse> CollectionAsync(UnionPayCollectionRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["channelType"] = request.ChannelType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.AccNo))
+            parameters["accNo"] = request.AccNo;
+        if (!string.IsNullOrEmpty(request.CustomerInfo))
+            parameters["customerInfo"] = request.CustomerInfo;
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayCollectionResponse
+        {
+            RespCode   = GetValue(raw, "respCode"),
+            RespMsg    = GetValue(raw, "respMsg"),
+            OrderId    = GetValue(raw, "orderId"),
+            QueryId    = GetValue(raw, "queryId"),
+            TxnAmt     = GetValue(raw, "txnAmt"),
+            SettleAmt  = GetValue(raw, "settleAmt"),
+            SettleDate = GetValue(raw, "settleDate"),
+            RawParams  = raw
+        };
+    }
+
+    public async Task<UnionPayPaymentResponse> PayToBankCardAsync(UnionPayPaymentRequest request, CancellationToken ct = default)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["txnType"]     = request.TxnType,
+            ["txnSubType"]  = request.TxnSubType,
+            ["bizType"]     = request.BizType,
+            ["channelType"] = request.ChannelType,
+            ["orderId"]     = request.OrderId,
+            ["txnTime"]     = request.TxnTime,
+            ["txnAmt"]      = request.TxnAmt,
+            ["backUrl"]     = string.IsNullOrEmpty(request.BackUrl) ? _options.BackUrl : request.BackUrl
+        };
+
+        if (!string.IsNullOrEmpty(request.AccNo))
+            parameters["accNo"] = request.AccNo;
+        if (!string.IsNullOrEmpty(request.CustomerInfo))
+            parameters["customerInfo"] = request.CustomerInfo;
+        if (!string.IsNullOrEmpty(request.ReqReserved))
+            parameters["reqReserved"] = request.ReqReserved;
+
+        var raw = await _http.PostBackAsync(parameters, _options.BackGatewayUrl, ct);
+        ValidateResponse(raw);
+
+        return new UnionPayPaymentResponse
+        {
+            RespCode   = GetValue(raw, "respCode"),
+            RespMsg    = GetValue(raw, "respMsg"),
+            OrderId    = GetValue(raw, "orderId"),
+            QueryId    = GetValue(raw, "queryId"),
+            TxnAmt     = GetValue(raw, "txnAmt"),
+            SettleAmt  = GetValue(raw, "settleAmt"),
+            SettleDate = GetValue(raw, "settleDate"),
+            RawParams  = raw
+        };
     }
 
     private static void ValidateResponse(Dictionary<string, string> raw)

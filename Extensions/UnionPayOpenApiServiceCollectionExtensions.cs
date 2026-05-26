@@ -10,6 +10,12 @@ namespace GaoXinLibrary.PaySDK.Extensions;
 /// </summary>
 public static class UnionPayOpenApiServiceCollectionExtensions
 {
+    /// <summary>
+    /// 注册银联 OpenAPI 服务（使用配置委托）
+    /// </summary>
+    /// <param name="services">服务集合</param>
+    /// <param name="configure">OpenAPI 配置委托</param>
+    /// <returns>服务集合（支持链式调用）</returns>
     public static IServiceCollection AddUnionPayOpenApi(
         this IServiceCollection services,
         Action<UnionPayOpenApiOptions> configure)
@@ -20,6 +26,12 @@ public static class UnionPayOpenApiServiceCollectionExtensions
         return services.AddUnionPayOpenApi(options);
     }
 
+    /// <summary>
+    /// 注册银联 OpenAPI 服务（直接传入配置对象）
+    /// </summary>
+    /// <param name="services">服务集合</param>
+    /// <param name="options">OpenAPI 配置对象（会进行 <see cref="System.ComponentModel.DataAnnotations.Validator"/> 校验）</param>
+    /// <returns>服务集合（支持链式调用）</returns>
     public static IServiceCollection AddUnionPayOpenApi(
         this IServiceCollection services,
         UnionPayOpenApiOptions options)

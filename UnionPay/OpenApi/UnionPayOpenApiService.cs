@@ -14,6 +14,11 @@ public sealed class UnionPayOpenApiService : IUnionPayOpenApiService
     private readonly UnionPayOpenApiOptions _options;
     private readonly RSA? _privateRsa;
 
+    /// <summary>
+    /// 初始化银联 OpenAPI 服务
+    /// </summary>
+    /// <param name="httpClient">HTTP 客户端实例</param>
+    /// <param name="options">OpenAPI 配置选项</param>
     public UnionPayOpenApiService(HttpClient httpClient, UnionPayOpenApiOptions options)
     {
         _httpClient = httpClient;
@@ -21,6 +26,14 @@ public sealed class UnionPayOpenApiService : IUnionPayOpenApiService
         _privateRsa = BuildPrivateRsaIfNeeded(options);
     }
 
+    /// <summary>
+    /// 向银联 OpenAPI 发送 POST 请求
+    /// <para>根据 <see cref="UnionPayOpenApiOptions.AuthMode"/> 自动附加 OAuth2 Bearer Token 或非对称签名头。</para>
+    /// </summary>
+    /// <param name="bizMethod">业务方法名</param>
+    /// <param name="payload">请求体（将序列化为 JSON）</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>API 响应原始字符串</returns>
     public async Task<string> PostAsync(string bizMethod, object payload, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bizMethod);
