@@ -1,5 +1,39 @@
 root = true
 
 [*.cs]
+# Forward CancellationToken to methods that accept it
 dotnet_diagnostic.CA2016.severity = warning
+# Rethrow to preserve stack details
 dotnet_diagnostic.CA2200.severity = error
+# Consider calling ConfigureAwait on the awaited task
+dotnet_diagnostic.CA2007.severity = warning
+# Validate arguments of public methods
+dotnet_diagnostic.CA1062.severity = warning
+# Do not catch general exception types
+dotnet_diagnostic.CA1031.severity = suggestion
+# Do not pass literals as localized parameters
+dotnet_diagnostic.CA1303.severity = suggestion
+# Mark members as static
+dotnet_diagnostic.CA1822.severity = warning
+# Remove unnecessary expression value
+dotnet_diagnostic.IDE0058.severity = warning
+# Use pattern matching
+dotnet_diagnostic.IDE0078.severity = suggestion
+# Simplify new expression
+dotnet_diagnostic.IDE0090.severity = warning
+# Use explicit type instead of var (prefer var)
+dotnet_diagnostic.IDE0007.severity = none
+dotnet_diagnostic.IDE0008.severity = none
+# Naming rules
+dotnet_naming_rule.private_members_with_underscore.severity = none
+# Nullable analysis
+dotnet_diagnostic.CS8618.severity = suggestion
+dotnet_diagnostic.CS8602.severity = warning
+dotnet_diagnostic.CS8603.severity = warning
+dotnet_diagnostic.CS8604.severity = warning
+# Async method names should end with Async
+dotnet_diagnostic.VSTHRD200.severity = suggestion
+# XML documentation
+dotnet_diagnostic.CS1591.severity = suggestion
+dotnet_diagnostic.CS1573.severity = warning
+dotnet_diagnostic.CS1574.severity = warning
