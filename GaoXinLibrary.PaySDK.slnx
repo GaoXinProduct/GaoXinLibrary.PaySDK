@@ -3,6 +3,6 @@
     <Project Path="src/GaoXinLibrary.PaySDK.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/GaoXinLibrary.PaySDK.Tests/GaoXinLibrary.PaySDK.Tests.csproj" />
+    <Project Path="tests/GaoXinLibrary.PaySDK.Tests.csproj" />
   </Folder>
 </Solution>

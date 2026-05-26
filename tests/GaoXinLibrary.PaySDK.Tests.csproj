@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\GaoXinLibrary.PaySDK.csproj" />
+    <ProjectReference Include="..\src\GaoXinLibrary.PaySDK.csproj" />
   </ItemGroup>
 
 </Project>
