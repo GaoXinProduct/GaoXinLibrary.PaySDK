@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -32,17 +33,29 @@ public sealed class AlipayHttpClient
         _httpClient = httpClient;
         _options = options;
         _signer = signer;
+
+        if (options.Environment == PayEnvironment.Sandbox)
+            options.GatewayUrl = PayConstants.AlipaySandboxGatewayUrl;
     }
 
     /// <summary>
     /// 执行支付宝网关 API 请求（Form POST），返回反序列化后的响应（含瞫态故障自动重试）
     /// </summary>
+    /// <param name="method">支付宝 API 方法名（如 alipay.trade.pay）</param>
+    /// <param name="bizContent">业务请求参数对象</param>
+    /// <param name="ct">取消令牌</param>
     /// <param name="extra">需要合并到公共参数的额外外层参数（如 notify_url）</param>
     public async Task<T> ExecuteAsync<T>(string method, object bizContent, CancellationToken ct = default, Dictionary<string, string>? extra = null)
         where T : AlipayBaseResponse
     {
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"Alipay.{method}");
+            activity?.SetTag("pay.channel", "alipay");
+            activity?.SetTag("pay.method", method);
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", _options.GatewayUrl);
+
             var bizContentJson = JsonSerializer.Serialize(bizContent, JsonOptions);
             var parameters = BuildCommonParameters(method, bizContentJson, extra);
             var signContent = BuildSignContent(parameters);
@@ -63,7 +76,18 @@ public sealed class AlipayHttpClient
             catch { encoding = Encoding.UTF8; }
             var responseJson = encoding.GetString(responseBytes);
 
-            return ParseResponse<T>(method, responseJson);
+            T result;
+            try
+            {
+                result = ParseResponse<T>(method, responseJson);
+                activity?.SetStatus(ActivityStatusCode.Ok);
+            }
+            catch (Exception)
+            {
+                activity?.SetStatus(ActivityStatusCode.Error);
+                throw;
+            }
+            return result;
         }, ct);
     }
 
@@ -174,12 +198,19 @@ public sealed class AlipayHttpClient
     {
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity("Alipay.DownloadBill");
+            activity?.SetTag("pay.channel", "alipay");
+            activity?.SetTag("http.method", "GET");
+            activity?.SetTag("http.url", url);
+
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.UserAgent.ParseAdd(PayConstants.UserAgent);
             using var response = await _httpClient.SendAsync(request, ct);
             EnsureTransientStatusHandled(response.StatusCode, "支付宝账单下载失败");
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsByteArrayAsync(ct);
+            var result = await response.Content.ReadAsByteArrayAsync(ct);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 

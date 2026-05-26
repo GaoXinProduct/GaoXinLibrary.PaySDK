@@ -74,6 +74,12 @@ public class UnionPayOptions
     public string SignMethod { get; set; } = "01";
 
     /// <summary>
+    /// 支付环境：Production（生产）/ Sandbox（沙箱）。
+    /// <para>银联测试环境需向银联申请测试商户号，地址：https://open.unionpay.com/tjweb/support/doc/online/3/125</para>
+    /// </summary>
+    public PayEnvironment Environment { get; set; } = PayEnvironment.Production;
+
+    /// <summary>
     /// 瞫态故障重试配置（网络抖动、超时、5xx）
     /// </summary>
     public PayRetryOptions RetryOptions { get; set; } = new();

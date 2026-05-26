@@ -54,6 +54,12 @@ public class AlipayOptions
     public string GatewayUrl { get; set; } = "https://openapi.alipay.com/gateway.do";
 
     /// <summary>
+    /// 支付环境：Production（生产）/ Sandbox（沙箱）。
+    /// <para>沙箱模式自动使用沙箱网关地址 https://openapi-sandbox.dl.alipaydev.com/gateway.do</para>
+    /// </summary>
+    public PayEnvironment Environment { get; set; } = PayEnvironment.Production;
+
+    /// <summary>
     /// 账单下载允许的主机后缀白名单。
     /// <para>用于校验 <c>alipay.data.dataservice.bill.downloadurl.query</c> 返回的下载链接，避免误下载到非支付宝域名。</para>
     /// </summary>

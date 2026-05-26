@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Web;
 using GaoXinLibrary.PaySDK.Core;
@@ -37,6 +38,11 @@ public sealed class UnionPayHttpClient
 
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity("UnionPay.PostBack");
+            activity?.SetTag("pay.channel", "unionpay");
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", gatewayUrl);
+
             var formContent = new FormUrlEncodedContent(parameters);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
@@ -45,7 +51,9 @@ public sealed class UnionPayHttpClient
             using var response = await _httpClient.SendAsync(request, ct);
             EnsureTransientStatusHandled(response.StatusCode, "银联后台请求失败");
             var body = await response.Content.ReadAsStringAsync(ct);
-            return ParseFormResponse(body);
+            var result = ParseFormResponse(body);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 
@@ -103,6 +111,11 @@ public sealed class UnionPayHttpClient
 
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity("UnionPay.DownloadFile");
+            activity?.SetTag("pay.channel", "unionpay");
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", gatewayUrl);
+
             var formContent = new FormUrlEncodedContent(parameters);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, gatewayUrl);
@@ -111,7 +124,9 @@ public sealed class UnionPayHttpClient
             using var response = await _httpClient.SendAsync(request, ct);
             EnsureTransientStatusHandled(response.StatusCode, "银联文件下载请求失败");
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsByteArrayAsync(ct);
+            var result = await response.Content.ReadAsByteArrayAsync(ct);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 

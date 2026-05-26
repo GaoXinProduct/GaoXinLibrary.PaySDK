@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -18,6 +19,10 @@ public sealed class WechatPayHttpClient
     private readonly WechatPayOptions _options;
     private readonly WechatPaySigner _signer;
 
+    /// <summary>
+    /// 微信支付 JSON 序列化选项
+    /// <para>配置：snake_case 命名策略、忽略 null 值、不转义中文。</para>
+    /// </summary>
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -42,6 +47,11 @@ public sealed class WechatPayHttpClient
     {
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"WechatPay.{path}");
+            activity?.SetTag("pay.channel", "wechat");
+            activity?.SetTag("http.method", "GET");
+            activity?.SetTag("http.url", path);
+
             var uri = new Uri(new Uri(_options.BaseUrl), path);
             var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
 
@@ -56,7 +66,9 @@ public sealed class WechatPayHttpClient
             var json = await response.Content.ReadAsStringAsync(ct);
             EnsureTransientStatusHandled(response.StatusCode, "微信支付 GET 请求失败");
             VerifyResponseSignature(response, json);
-            return DeserializeAndValidate<T>(json, response.StatusCode);
+            var result = DeserializeAndValidate<T>(json, response.StatusCode);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 
@@ -71,6 +83,11 @@ public sealed class WechatPayHttpClient
     {
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"WechatPay.{path}");
+            activity?.SetTag("pay.channel", "wechat");
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", path);
+
             var uri = new Uri(new Uri(_options.BaseUrl), path);
             var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
             var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
@@ -89,7 +106,9 @@ public sealed class WechatPayHttpClient
             var json = await response.Content.ReadAsStringAsync(ct);
             EnsureTransientStatusHandled(response.StatusCode, "微信支付 POST 请求失败");
             VerifyResponseSignature(response, json);
-            return DeserializeAndValidate<T>(json, response.StatusCode);
+            var result = DeserializeAndValidate<T>(json, response.StatusCode);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 
@@ -104,6 +123,11 @@ public sealed class WechatPayHttpClient
     {
         await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"WechatPay.{path}");
+            activity?.SetTag("pay.channel", "wechat");
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", path);
+
             var uri = new Uri(new Uri(_options.BaseUrl), path);
             var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
             var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
@@ -127,10 +151,15 @@ public sealed class WechatPayHttpClient
                 {
                     var err = JsonSerializer.Deserialize<WechatPayBaseResponse>(errorJson, JsonOptions);
                     if (err != null && !string.IsNullOrEmpty(err.Code))
+                    {
+                        activity?.SetStatus(ActivityStatusCode.Error, err.Message);
                         throw new PayException(err.Code, err.Message ?? string.Empty, null);
+                    }
                 }
+                activity?.SetStatus(ActivityStatusCode.Error);
                 throw new PayException("API_ERROR", $"微信支付 API 返回错误，HTTP {(int)response.StatusCode}", null);
             }
+            activity?.SetStatus(ActivityStatusCode.Ok);
             return true;
         }, ct);
     }
@@ -157,6 +186,11 @@ public sealed class WechatPayHttpClient
 
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"WechatPay.{path}");
+            activity?.SetTag("pay.channel", "wechat");
+            activity?.SetTag("http.method", "POST");
+            activity?.SetTag("http.url", path);
+
             var uri = new Uri(new Uri(_options.BaseUrl), path);
             var bodyJson = JsonSerializer.Serialize(body, JsonOptions);
             var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "POST", uri.PathAndQuery, bodyJson);
@@ -174,7 +208,9 @@ public sealed class WechatPayHttpClient
             var json = await response.Content.ReadAsStringAsync(ct);
             EnsureTransientStatusHandled(response.StatusCode, "微信支付加密 POST 请求失败");
             VerifyResponseSignature(response, json);
-            return DeserializeAndValidate<T>(json, response.StatusCode);
+            var result = DeserializeAndValidate<T>(json, response.StatusCode);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 
@@ -185,6 +221,11 @@ public sealed class WechatPayHttpClient
     {
         return await ExecuteWithRetryAsync(async () =>
         {
+            using var activity = PayActivitySource.Source.StartActivity($"WechatPay.{path}");
+            activity?.SetTag("pay.channel", "wechat");
+            activity?.SetTag("http.method", "GET");
+            activity?.SetTag("http.url", path);
+
             var uri = new Uri(new Uri(_options.BaseUrl), path);
             var authorization = _signer.BuildAuthorization(_options.MchId, _options.CertSerialNo, "GET", uri.PathAndQuery, string.Empty);
 
@@ -197,7 +238,9 @@ public sealed class WechatPayHttpClient
             using var response = await _httpClient.SendAsync(request, ct);
             EnsureTransientStatusHandled(response.StatusCode, "微信支付下载账单失败");
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsByteArrayAsync(ct);
+            var result = await response.Content.ReadAsByteArrayAsync(ct);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }, ct);
     }
 

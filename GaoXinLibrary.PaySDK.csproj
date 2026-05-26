@@ -44,6 +44,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>GaoXinLibrary.PaySDK.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include=".github\workflows\publish.yml" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
@@ -53,6 +59,7 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.*" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="8.*" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="8.*" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.*" />
 	</ItemGroup>
 
 	<!-- net9.0 → 最新 9.x -->
@@ -60,6 +67,7 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="9.*" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="9.*" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.*" />
 	</ItemGroup>
 
 	<!-- net10.0 → 最新 10.x -->
@@ -67,6 +75,7 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.*" />
 		<PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.*" />
 	</ItemGroup>
 
 </Project>
