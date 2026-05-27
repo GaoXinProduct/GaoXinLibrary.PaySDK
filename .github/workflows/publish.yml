@@ -11,6 +11,7 @@ permissions:
   packages: write
 
 env:
+  SOLUTION: GaoXinLibrary.PaySDK.slnx
   PROJECT_PATH: src/GaoXinLibrary.PaySDK.csproj
   TEST_PATH: tests/GaoXinLibrary.PaySDK.Tests.csproj
   GHPKG_FEED: https://nuget.pkg.github.com/GaoXinProduct/index.json
@@ -53,13 +54,13 @@ jobs:
             8.0.x
 
       - name: Restore
-        run: dotnet restore "${{ env.PROJECT_PATH }}"
+        run: dotnet restore "${{ env.SOLUTION }}"
 
       - name: Build (Release portable PDB)
-        run: dotnet build "${{ env.PROJECT_PATH }}" -c Release --no-restore /p:ContinuousIntegrationBuild=true /p:DebugType=portable /p:DebugSymbols=true
+        run: dotnet build "${{ env.SOLUTION }}" -c Release --no-restore /p:ContinuousIntegrationBuild=true /p:DebugType=portable /p:DebugSymbols=true
 
       - name: Test
-        run: dotnet test "${{ env.TEST_PATH }}" -c Release --no-build --verbosity normal
+        run: dotnet test "${{ env.SOLUTION }}" -c Release --no-build --verbosity normal
 
       - name: Pack
         run: |
