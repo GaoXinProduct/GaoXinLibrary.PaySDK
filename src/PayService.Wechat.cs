@@ -221,13 +221,7 @@ public sealed partial class PayService : IPayService
         CancellationToken ct)
     {
         EnsureWechat();
-        var callbackHeaders = new WechatPayCallbackHeaders
-        {
-            Timestamp = headers?.TryGetValue("Wechatpay-Timestamp", out var t) == true ? t : string.Empty,
-            Nonce     = headers?.TryGetValue("Wechatpay-Nonce",     out var n) == true ? n : string.Empty,
-            Signature = headers?.TryGetValue("Wechatpay-Signature", out var s) == true ? s : string.Empty,
-            Serial    = headers?.TryGetValue("Wechatpay-Serial",    out var sn) == true ? sn : null
-        };
+        var callbackHeaders = WechatPayCallbackHeaders.FromHeaders(headers ?? new Dictionary<string, string>());
 
         try
         {

@@ -613,7 +613,7 @@ byte[] unionCsv = await pay.DownloadBillAsync(new DownloadBillRequest
 ```csharp
 // ── 微信支付回调（JSON Body + HTTP Header 签名验证） ──
 [HttpPost("wechat/notify")]
-public async Task<IActionResult> WechatNotify([FromServices] IPayService pay)
+public async Task<IActionResult> WechatNotify([FromServices] IPayService pay, [FromServices] IOrderRepository orders)
 {
     using var reader = new StreamReader(Request.Body);
     var body = await reader.ReadToEndAsync();
@@ -631,14 +631,20 @@ public async Task<IActionResult> WechatNotify([FromServices] IPayService pay)
     if (!result.IsValid)
         return BadRequest();
 
-    // result.OutTradeNo / result.TransactionId / result.TotalFee / result.TradeStatus
-    // 处理业务逻辑...
+    var order = await orders.FindAsync(result.OutTradeNo);
+    if (order is null
+        || order.Channel != PayChannel.WechatJsapi
+        || order.TotalFee != result.TotalFee
+        || result.TradeStatus != "SUCCESS")
+        return BadRequest();
+
+    await orders.MarkPaidOnceAsync(order.Id, result.TransactionId, result.SuccessTime);
     return Ok(new { code = "SUCCESS", message = "成功" });
 }
 
 // ── 支付宝回调（Form 表单 POST，签名验证） ──
 [HttpPost("alipay/notify")]
-public async Task<IActionResult> AlipayNotify([FromServices] IPayService pay)
+public async Task<IActionResult> AlipayNotify([FromServices] IPayService pay, [FromServices] IOrderRepository orders)
 {
     var form = Request.Form.ToDictionary(k => k.Key, v => v.Value.ToString());
     var formString = string.Join("&",
@@ -649,13 +655,27 @@ public async Task<IActionResult> AlipayNotify([FromServices] IPayService pay)
     if (!result.IsValid)
         return BadRequest();
 
-    // result.OutTradeNo / result.TradeStatus ("TRADE_SUCCESS" / "TRADE_FINISHED")
+    var order = await orders.FindAsync(result.OutTradeNo);
+    if (order is null
+        || order.Channel != PayChannel.AlipayPage
+        || order.TotalFee != result.TotalFee
+        || result.TradeStatus is not ("TRADE_SUCCESS" or "TRADE_FINISHED"))
+        return BadRequest();
+
+    if (result.RawBody is not null)
+    {
+        var raw = HttpUtility.ParseQueryString(result.RawBody);
+        if (raw["app_id"] != "your_app_id" || raw["seller_id"] != "your_seller_id")
+            return BadRequest();
+    }
+
+    await orders.MarkPaidOnceAsync(order.Id, result.TransactionId, result.SuccessTime);
     return Content("success", "text/plain");
 }
 
 // ── 银联回调（Form 表单 POST，签名验证） ──
 [HttpPost("unionpay/notify")]
-public async Task<IActionResult> UnionPayNotify([FromServices] IPayService pay)
+public async Task<IActionResult> UnionPayNotify([FromServices] IPayService pay, [FromServices] IOrderRepository orders)
 {
     var form = Request.Form.ToDictionary(k => k.Key, v => v.Value.ToString());
     var formString = string.Join("&",
@@ -666,10 +686,19 @@ public async Task<IActionResult> UnionPayNotify([FromServices] IPayService pay)
     if (!result.IsValid)
         return BadRequest();
 
-    // result.OutTradeNo / result.TransactionId / result.TotalFee
+    var order = await orders.FindAsync(result.OutTradeNo);
+    if (order is null
+        || order.Channel != PayChannel.UnionPayGateway
+        || order.TotalFee != result.TotalFee
+        || result.TradeStatus != "SUCCESS")
+        return BadRequest();
+
+    await orders.MarkPaidOnceAsync(order.Id, result.TransactionId, result.SuccessTime);
     return Content("ok", "text/plain");
 }
 ```
+
+> 回调的 `IsValid` 仅表示渠道签名验证通过。返回成功前仍必须校验本地订单号、金额、商户/App 身份、交易状态，并做幂等更新。
 
 ---
 
@@ -1098,7 +1127,7 @@ public class AlipayController(IAlipayService alipay)
     public AlipayCallbackParams ParseCallback(IDictionary<string, string> formParams)
     {
         var result = alipay.ParseCallback(formParams);
-        // result.IsValid / result.TradeStatus / result.OutTradeNo / result.TradeNo
+        // IsValid 仅代表签名通过；业务层还必须校验 app_id、seller_id、out_trade_no、total_amount、trade_status 和幂等状态。
         return result;
     }
 }
@@ -1962,6 +1991,7 @@ builder.Services.AddUnionPayOpenApi(opt =>
     // 1) OAuth2
     // opt.AuthMode = UnionPayOpenApiAuthMode.OAuth2;
     // opt.OAuthToken = "your_access_token";
+    // opt.OAuthSignatureKey = "your_signature_key"; // 用于生成 X-OPEN-SIGN
 
     // 2) 非对称验签（RSA2）
     opt.AuthMode = UnionPayOpenApiAuthMode.Asymmetric;
@@ -1977,6 +2007,8 @@ public class UnionPayOpenApiController(IUnionPayOpenApiService openApi)
     }
 }
 ```
+
+OAuth2 模式会按银联 OpenAPI 规则发送 `X-OPEN-TOKEN`、`X-OPEN-SIGN`、`X-OPEN-TS`，其中 `X-OPEN-SIGN` 使用 `SHA256(OAuthSignatureKey + body + ts)` 生成。
 
 > 该模块定位为 OpenAPI 认证与请求骨架，不改变现有收单支付接口行为。你可以在其上按产品文档逐步扩展具体 OpenAPI 能力。
 
@@ -2282,6 +2314,18 @@ builder.Services.AddWechatPay(opt =>
 | `SignMethod` | string | — | 签名方式，`01`=RSA / `11`=SM2，默认 `01` |
 | `RetryOptions` | `PayRetryOptions` | — | 瞬态故障重试配置（默认 2 次重试，500ms 起始延迟），详见[瞬态故障自动重试](#瞬态故障自动重试) |
 
+### UnionPayOpenApiOptions
+
+| 属性 | 类型 | 必填 | 说明 |
+|------|------|:----:|------|
+| `BaseUrl` | string | ✅ | OpenAPI 基础地址，默认 `https://openapi.unionpay.com` |
+| `AppId` | string | ✅ | 银联 OpenAPI 应用标识 |
+| `AuthMode` | `UnionPayOpenApiAuthMode` | — | 认证模式，默认 `Asymmetric` |
+| `OAuthToken` | string | OAuth2 必填 | OAuth2 产品 token，对应 `X-OPEN-TOKEN` |
+| `OAuthSignatureKey` | string | OAuth2 必填 | OAuth2 签名密钥，用于生成 `X-OPEN-SIGN` |
+| `PrivateKey` | string | 非对称必填 | RSA2 非对称模式签名私钥 |
+| `HttpTimeout` | TimeSpan | — | HTTP 超时，默认 30 秒 |
+
 > **💡 配置验证**：所有标注为 ✅ 必填的属性均在 DI 注册时通过 `[Required]` + `Validator.ValidateObject` 自动校验，缺失时立即抛出 `ValidationException`，而非等到首次 API 调用时才报错。
 
 ---
@@ -2342,7 +2386,7 @@ catch (PayException ex)
 ## 项目结构
 
 ```
-src/GaoXinLibrary.PaySDK/
+src/
 ├── Core/                           # 统一基础类型
 │   ├── IPayService.cs              # 统一支付接口
 │   ├── PayChannel.cs               # 渠道枚举（17 种子渠道，含 Apple Pay）
@@ -2454,16 +2498,16 @@ src/GaoXinLibrary.PaySDK/
 
 ## 单元测试
 
-项目包含完整的单元测试套件，位于 `GaoXinLibrary.PaySDK.Tests/` 测试项目中，共计 **159 个测试用例**，全部通过。
+项目包含完整的单元测试套件，位于 `tests/` 测试项目中，共计 **167 个测试用例**，全部通过。
 
 ### 运行测试
 
 ```bash
 # 运行全部测试
-dotnet test GaoXinLibrary.PaySDK.Tests/
+dotnet test tests/GaoXinLibrary.PaySDK.Tests.csproj
 
 # 运行指定测试分类
-dotnet test GaoXinLibrary.PaySDK.Tests/ --filter "Category=SignerTests"
+dotnet test tests/GaoXinLibrary.PaySDK.Tests.csproj --filter "FullyQualifiedName~SignerTests"
 ```
 
 ### 测试分类
@@ -2477,6 +2521,7 @@ dotnet test GaoXinLibrary.PaySDK.Tests/ --filter "Category=SignerTests"
 | `PayJsonSerializerTests.cs` | snake_case 序列化/反序列化、Unicode 转义控制 |
 | `PayServiceTests.cs` | 统一接口路由（IPayService）集成测试 |
 | `EdgeCaseTests.cs` | 边界场景（空值处理、特殊字符、超长字符串等） |
+| `PaymentSecurityRegressionTests.cs` | 支付响应验签、微信回调头、防重放与银联 OpenAPI OAuth2 签名回归 |
 
 ---
 

@@ -46,10 +46,17 @@ public class WechatPayCallbackHeaders
     /// <param name="headers">HTTP 请求头字典（键不区分大小写）</param>
     public static WechatPayCallbackHeaders FromHeaders(IDictionary<string, string> headers)
     {
-        headers.TryGetValue(TimestampHeader, out var ts);
-        headers.TryGetValue(NonceHeader,     out var nonce);
-        headers.TryGetValue(SignatureHeader, out var sig);
-        headers.TryGetValue(SerialHeader,    out var serial);
+        var lookup = headers as IReadOnlyDictionary<string, string>
+                     ?? new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
+        if (!lookup.TryGetValue(TimestampHeader, out var ts))
+            ts = TryGetCaseInsensitive(headers, TimestampHeader);
+        if (!lookup.TryGetValue(NonceHeader, out var nonce))
+            nonce = TryGetCaseInsensitive(headers, NonceHeader);
+        if (!lookup.TryGetValue(SignatureHeader, out var sig))
+            sig = TryGetCaseInsensitive(headers, SignatureHeader);
+        if (!lookup.TryGetValue(SerialHeader, out var serial))
+            serial = TryGetCaseInsensitive(headers, SerialHeader);
+
         return new WechatPayCallbackHeaders
         {
             Timestamp = ts        ?? string.Empty,
@@ -57,5 +64,15 @@ public class WechatPayCallbackHeaders
             Signature = sig       ?? string.Empty,
             Serial    = serial
         };
+    }
+
+    private static string? TryGetCaseInsensitive(IDictionary<string, string> headers, string key)
+    {
+        foreach (var kv in headers)
+        {
+            if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+        return null;
     }
 }

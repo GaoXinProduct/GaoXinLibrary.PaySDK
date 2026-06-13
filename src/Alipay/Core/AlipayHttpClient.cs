@@ -214,7 +214,7 @@ public sealed class AlipayHttpClient
         }, ct);
     }
 
-    private static T ParseResponse<T>(string method, string responseJson) where T : AlipayBaseResponse
+    private T ParseResponse<T>(string method, string responseJson) where T : AlipayBaseResponse
     {
         using var doc = JsonDocument.Parse(responseJson);
         var root = doc.RootElement;
@@ -234,6 +234,8 @@ public sealed class AlipayHttpClient
             throw new AlipayException("INVALID_RESPONSE", $"支付宝响应中未找到 {responseKey}，原始响应：{responseJson}");
         }
 
+        VerifyResponseSignature(responseElement, root);
+
         var result = responseElement.Deserialize<T>(JsonOptions)
             ?? throw new AlipayException("DESERIALIZE_FAILED", "反序列化支付宝响应失败");
 
@@ -246,6 +248,20 @@ public sealed class AlipayHttpClient
         }
 
         return result;
+    }
+
+    private void VerifyResponseSignature(JsonElement responseElement, JsonElement root)
+    {
+        if (!root.TryGetProperty("sign", out var signElement) || signElement.ValueKind != JsonValueKind.String)
+            throw new AlipayException("VERIFY_FAILED", "支付宝响应缺少签名字段 sign");
+
+        var sign = signElement.GetString();
+        if (string.IsNullOrWhiteSpace(sign))
+            throw new AlipayException("VERIFY_FAILED", "支付宝响应签名为空");
+
+        var signContent = responseElement.GetRawText();
+        if (!_signer.Verify(signContent, sign))
+            throw new AlipayException("VERIFY_FAILED", "支付宝响应签名验证失败");
     }
 
     // ─── 瞫态故障自动重试 ─────────────────────────────────────────────

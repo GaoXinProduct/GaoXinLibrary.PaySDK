@@ -28,7 +28,7 @@ public sealed class UnionPayOpenApiService : IUnionPayOpenApiService
 
     /// <summary>
     /// 向银联 OpenAPI 发送 POST 请求
-    /// <para>根据 <see cref="UnionPayOpenApiOptions.AuthMode"/> 自动附加 OAuth2 Bearer Token 或非对称签名头。</para>
+    /// <para>根据 <see cref="UnionPayOpenApiOptions.AuthMode"/> 自动附加 OAuth2 X-OPEN 头或非对称签名头。</para>
     /// </summary>
     /// <param name="bizMethod">业务方法名</param>
     /// <param name="payload">请求体（将序列化为 JSON）</param>
@@ -55,7 +55,14 @@ public sealed class UnionPayOpenApiService : IUnionPayOpenApiService
         {
             if (string.IsNullOrWhiteSpace(_options.OAuthToken))
                 throw new InvalidOperationException("银联 OpenAPI OAuth2 模式下必须配置 OAuthToken");
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _options.OAuthToken);
+            if (string.IsNullOrWhiteSpace(_options.OAuthSignatureKey))
+                throw new InvalidOperationException("银联 OpenAPI OAuth2 模式下必须配置 OAuthSignatureKey");
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            var signature = BuildOAuthSignature(body, timestamp, _options.OAuthSignatureKey);
+            request.Headers.TryAddWithoutValidation("X-OPEN-TOKEN", _options.OAuthToken);
+            request.Headers.TryAddWithoutValidation("X-OPEN-SIGN", signature);
+            request.Headers.TryAddWithoutValidation("X-OPEN-TS", timestamp);
         }
         else
         {
@@ -93,5 +100,11 @@ public sealed class UnionPayOpenApiService : IUnionPayOpenApiService
         var bytes = Encoding.UTF8.GetBytes(content);
         var signed = _privateRsa.SignData(bytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         return Convert.ToBase64String(signed);
+    }
+
+    private static string BuildOAuthSignature(string body, string timestamp, string signatureKey)
+    {
+        var bytes = Encoding.UTF8.GetBytes(signatureKey + body + timestamp);
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 }

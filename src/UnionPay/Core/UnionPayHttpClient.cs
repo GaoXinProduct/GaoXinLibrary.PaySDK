@@ -52,6 +52,8 @@ public sealed class UnionPayHttpClient
             EnsureTransientStatusHandled(response.StatusCode, "银联后台请求失败");
             var body = await response.Content.ReadAsStringAsync(ct);
             var result = ParseFormResponse(body);
+            if (!VerifyCallback(result))
+                throw new UnionPayException("VERIFY_FAILED", "银联响应签名验证失败");
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }, ct);

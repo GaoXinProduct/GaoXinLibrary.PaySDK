@@ -16,6 +16,8 @@ namespace GaoXinLibrary.PaySDK.Wechat.Core;
 /// </summary>
 public sealed class WechatPaySigner
 {
+    private const long SignatureTimestampMaxSkewSeconds = 300;
+
     private readonly RSA _rsa;
     private readonly RSA? _platformRsa;
     private readonly byte[] _apiV3KeyBytes;
@@ -151,35 +153,39 @@ public sealed class WechatPaySigner
         if (headers.Signature.StartsWith("WECHATPAY/SIGNTEST/", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        if (string.IsNullOrWhiteSpace(headers.Serial))
+            return false;
+
+        if (!long.TryParse(headers.Timestamp, out var timestamp))
+            return false;
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (Math.Abs(now - timestamp) > SignatureTimestampMaxSkewSeconds)
+            return false;
+
         RSA? verifyKey = null;
 
         // 1. 按 Wechatpay-Serial 从缓存中统一查找
         //    缓存同时包含：
         //    - 构造函数中注册的 PlatformPublicKeyId → PlatformPublicKey（公钥模式）
         //    - DownloadCertificatesAsync / RegisterCertificate 注册的 证书序列号 → 证书公钥（证书模式）
-        if (headers.Serial is not null)
-            _certCache.TryGetValue(headers.Serial, out verifyKey);
+        _certCache.TryGetValue(headers.Serial, out verifyKey);
 
         // 2. 缓存未命中时的兜底策略
         if (verifyKey is null)
         {
-            if (headers.Serial is not null && headers.Serial.StartsWith("PUB_KEY_ID_", StringComparison.OrdinalIgnoreCase))
+            if (headers.Serial.StartsWith("PUB_KEY_ID_", StringComparison.OrdinalIgnoreCase))
             {
                 // PUB_KEY_ID_ 模式：仅当配置的确实是独立公钥（非平台证书）时使用 _platformRsa
                 // 若 PlatformPublicKey 是平台证书，其密钥与微信支付公钥不同，不能用于公钥模式验签
                 verifyKey = IsPlatformPublicKeyMode ? _platformRsa : null;
             }
-            else if (headers.Serial is not null)
+            else
             {
                 // 平台证书模式：有明确的 Wechatpay-Serial 但缓存中未命中
                 // 仅使用外部显式传入的 platformPublicKey（如有），不使用 _platformRsa
                 // 因为 _platformRsa 可能来自商户证书等非平台密钥，使用错误密钥会导致验签失败
                 verifyKey = platformPublicKey;
-            }
-            else
-            {
-                // 无 serial 的场景（如手动调用）：外部传入公钥 → 配置的平台公钥
-                verifyKey = platformPublicKey ?? _platformRsa;
             }
         }
 

@@ -21,6 +21,9 @@ public sealed class UnionPayOpenApiOptions
     /// <summary>OAuth2 Token（OAuth2 模式必填）</summary>
     public string? OAuthToken { get; set; }
 
+    /// <summary>OAuth2 签名密钥（OAuth2 模式必填，用于生成 X-OPEN-SIGN）</summary>
+    public string? OAuthSignatureKey { get; set; }
+
     /// <summary>商户签名私钥（非对称模式必填，PEM/Base64）</summary>
     public string? PrivateKey { get; set; }
 
